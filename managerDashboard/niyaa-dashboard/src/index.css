@@ -1,0 +1,212 @@
+/* ============================================================
+   FILE: src/index.css - Firecracker App (Mobile First)
+   ============================================================ */
+
+/* Import Google Outfit Font */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html, body {
+    height: 100%;
+    font-family: 'Outfit', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    transition: background 0.3s ease, color 0.3s ease;
+    line-height: 1.6;
+}
+
+/* Proper Body Padding & Spacing */
+body {
+    background: #f9f6ff;
+    color: #2c1f4a;
+    padding-top: 0;
+    padding-bottom: 20px;
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+/* Extra top padding for fixed navbar */
+.main-content {
+    padding-top: 20px;
+}
+
+/* DARK MODE */
+[data-bs-theme='dark'] body {
+    background: #0a0614;
+    color: #e0d4ff;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: #e9e4f0;
+    border-radius: 10px;
+}
+::-webkit-scrollbar-thumb {
+    background: #8b5cf6;
+    border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #7c3aed;
+}
+
+[data-bs-theme='dark'] ::-webkit-scrollbar-track {
+    background: #2d2d3f;
+}
+
+/* ============================================================
+   PRODUCT CARD & OFFER-STYLE CATEGORY
+   ============================================================ */
+
+.product-card .card {
+    background: #ffffff;
+    border: 1px solid #d8c9f0;
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 6px 18px rgba(139, 92, 246, 0.1);
+    height: 100%;
+    transition: all 0.3s ease;
+}
+
+.product-card:hover .card {
+    transform: translateY(-8px);
+    box-shadow: 0 20px 40px rgba(139, 92, 246, 0.18);
+}
+
+[data-bs-theme='dark'] .product-card .card {
+    background: #1e1b2e;
+    border-color: #4c3a7a;
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.45);
+}
+
+.product-card img {
+    height: 165px;
+    object-fit: cover;
+    width: 100%;
+    background: #f0e9ff;
+    transition: transform 0.4s ease;
+}
+
+.product-card:hover img {
+    transform: scale(1.05);
+}
+
+/* Offer Style Category Badge */
+.category-offer {
+    display: inline-block;
+    background: linear-gradient(90deg, #f59e0b, #ef4444);
+    color: white;
+    font-size: 0.78rem;
+    font-weight: 700;
+    padding: 4px 12px;
+    border-radius: 20px;
+    margin-top: 4px;
+    box-shadow: 0 3px 8px rgba(245, 158, 11, 0.35);
+    letter-spacing: 0.4px;
+}
+
+[data-bs-theme='dark'] .category-offer {
+    background: linear-gradient(90deg, #fbbf24, #f87171);
+    color: #1e1b2e;
+}
+
+/* 3D Buttons */
+.btn-3d {
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.25);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    font-weight: 600;
+}
+
+.btn-3d:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 22px rgba(139, 92, 246, 0.35);
+}
+
+.btn-3d:active {
+    transform: translateY(1px);
+}
+
+/* Saving Indicator */
+.saving-indicator {
+    position: fixed;
+    top: 68px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1200;
+    padding: 8px 18px;
+    border-radius: 30px;
+    font-size: 0.85rem;
+    background: #8b5cf6;
+    color: white;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+    white-space: nowrap;
+}
+
+/* Modal */
+.modal-content {
+    border-radius: 20px;
+    border: none;
+}
+
+.modal-body {
+    max-height: 68vh;
+    overflow-y: auto;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 576px) {
+    body {
+        padding-left: 6px;
+        padding-right: 6px;
+    }
+    .product-card img {
+        height: 135px;
+    }
+    .modal-dialog {
+        margin: 8px;
+        max-width: none;
+    }
+    .modal-content {
+        border-radius: 16px;
+    }
+    .btn-3d {
+        height: 40px;
+        font-size: 0.9rem;
+    }
+    .saving-indicator {
+        top: 62px;
+        font-size: 0.8rem;
+        padding: 6px 14px;
+    }
+}
+
+@media (min-width: 768px) {
+    body {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+    .product-card img {
+        height: 175px;
+    }
+    .main-content {
+        padding-top: 24px;
+    }
+}
+
+@media (min-width: 992px) {
+    body {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+}
