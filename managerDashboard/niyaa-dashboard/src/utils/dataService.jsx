@@ -1,22 +1,52 @@
 /**
  * ============================================================================
- * Data Service
+ * DATA SERVICE
+ * ============================================================================
+ *
+ * Purpose
  * ----------------------------------------------------------------------------
- * Purpose:
- * - Manages store data (products + enquiries)
- * - Uses localStorage as the guaranteed working data source
- * - Optionally syncs to remote JSON endpoint in environments where it is allowed
+ * Centralized storage layer for the dashboard.
  *
- * Why this version?
- * - Your current remote endpoint is blocked by CORS when called directly
- *   from the browser (localhost / frontend origin).
- * - To keep the dashboard production-safe and error-free, this service:
- *    1) works fully with localStorage
- *    2) only attempts remote sync when explicitly enabled
- *    3) suppresses noisy CORS failures during local development
+ * Responsibilities:
  *
- * Recommended production architecture:
- *   Frontend -> your backend/proxy -> remote JSON provider
+ * 1. Fetch dashboard data.
+ * 2. Save dashboard data.
+ * 3. Maintain browser cache.
+ * 4. Synchronize with remote storage through Vercel API.
+ * 5. Provide fallback data when remote services are unavailable.
+ *
+ *
+ * Architecture
+ * ----------------------------------------------------------------------------
+ *
+ * React Components
+ *        ↓
+ * dataService.js
+ *        ↓
+ * /api/store (Vercel Serverless API)
+ *        ↓
+ * myjson.online
+ *
+ *
+ * Why this service exists
+ * ----------------------------------------------------------------------------
+ *
+ * Components should NEVER:
+ *
+ * - call fetch() directly
+ * - access localStorage directly
+ * - know API endpoints
+ *
+ * All storage concerns must remain isolated here.
+ *
+ * Benefits:
+ *
+ * ✓ Single source of truth
+ * ✓ Easier maintenance
+ * ✓ Easier migration to database later
+ * ✓ Centralized error handling
+ * ✓ Offline-friendly behavior
+ *
  * ============================================================================
  */
 
@@ -26,61 +56,31 @@ import {
   ENQUIRY_STORAGE_KEY,
   FALLBACK_PRODUCTS,
   DEFAULT_ENQUIRIES,
+  ENABLE_REMOTE_SYNC,
 } from '../utils/constants';
 
 /* -------------------------------------------------------------------------- */
-/* Environment Configuration                                                  */
+/* Configuration                                                              */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Detect whether the app is running in local development.
- * Vite exposes import.meta.env.DEV during development.
+ * Determines whether remote synchronization should be attempted.
  */
-const IS_DEV =
-  typeof import.meta !== 'undefined' &&
-  import.meta.env &&
-  Boolean(import.meta.env.DEV);
-
-/**
- * IMPORTANT:
- * Direct browser requests to your current myjson.online endpoint are being
- * blocked by CORS. Because of that, remote sync should be OFF by default.
- *
- * If later you move to:
- * - a backend proxy, or
- * - a remote endpoint that supports browser CORS
- *
- * then you can enable remote sync by setting:
- * VITE_ENABLE_REMOTE_SYNC=true
- */
-const ENABLE_REMOTE_SYNC =
-  typeof import.meta !== 'undefined' &&
-  import.meta.env &&
-  import.meta.env.VITE_ENABLE_REMOTE_SYNC === 'true';
-
-/**
- * Final flag used by fetch/save methods.
- * We keep remote sync disabled by default unless explicitly enabled.
- */
-const SHOULD_USE_REMOTE = Boolean(JSON_URL) && ENABLE_REMOTE_SYNC;
+const SHOULD_USE_REMOTE =
+  ENABLE_REMOTE_SYNC &&
+  Boolean(JSON_URL);
 
 /* -------------------------------------------------------------------------- */
 /* Utility Helpers                                                            */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Returns true if localStorage is available and usable.
- */
-function canUseStorage() {
-  try {
-    return typeof window !== 'undefined' && typeof localStorage !== 'undefined';
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Deep clone helper to prevent accidental mutation of imported constants.
+ * Creates a deep clone of an object or array.
+ *
+ * Prevents accidental mutation of imported constants.
+ *
+ * @param {*} value
+ * @returns {*}
  */
 function clone(value) {
   try {
@@ -91,8 +91,34 @@ function clone(value) {
 }
 
 /**
- * Safe JSON.parse wrapper.
- * Returns fallback if parsing fails.
+ * Determines whether browser localStorage can be used.
+ *
+ * Protects the application from runtime errors in:
+ * - SSR environments
+ * - Restricted browser sessions
+ *
+ * @returns {boolean}
+ */
+function canUseStorage() {
+  try {
+    return (
+      typeof window !== 'undefined' &&
+      typeof localStorage !== 'undefined'
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Safely parses JSON strings.
+ *
+ * Returns fallback value when parsing fails.
+ *
+ * @param {string|null} raw
+ * @param {*} fallback
+ *
+ * @returns {*}
  */
 function safeParse(raw, fallback) {
   if (!raw) return clone(fallback);
@@ -100,69 +126,111 @@ function safeParse(raw, fallback) {
   try {
     return JSON.parse(raw);
   } catch (error) {
-    console.warn('[DataService] Failed to parse cached JSON:', error);
+    console.warn(
+      '[DataService] Failed to parse JSON:',
+      error
+    );
+
     return clone(fallback);
   }
 }
 
 /**
- * Returns true if the value is a plain object.
+ * Checks whether a value is a plain object.
+ *
+ * Excludes:
+ * - arrays
+ * - null
+ *
+ * @param {*} value
+ *
+ * @returns {boolean}
  */
 function isObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value)
+  );
 }
 
 /* -------------------------------------------------------------------------- */
-/* Local Storage Access                                                       */
+/* Local Storage                                                              */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Read cached products from localStorage.
- * Returns:
- * - array of products if valid
- * - null if missing / invalid
+ * Retrieves products from browser cache.
+ *
+ * @returns {Array|null}
  */
 function readLocalProducts() {
   if (!canUseStorage()) return null;
-  return safeParse(localStorage.getItem(STORAGE_KEY), null);
+
+  return safeParse(
+    localStorage.getItem(STORAGE_KEY),
+    null
+  );
 }
 
 /**
- * Persist products to localStorage.
+ * Persists products into browser cache.
+ *
+ * Local persistence always happens before
+ * remote synchronization.
+ *
+ * @param {Array} products
  */
 function writeLocalProducts(products) {
   if (!canUseStorage()) return;
   if (!Array.isArray(products)) return;
 
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(products));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(products)
+    );
   } catch (error) {
-    console.warn('[DataService] Failed to write products to localStorage:', error);
+    console.warn(
+      '[DataService] Failed to save products:',
+      error
+    );
   }
 }
 
 /**
- * Read cached enquiries from localStorage.
+ * Retrieves enquiry statistics from browser cache.
+ *
+ * @returns {Object}
  */
 function readLocalEnquiries() {
-  if (!canUseStorage()) return clone(DEFAULT_ENQUIRIES);
-  return safeParse(localStorage.getItem(ENQUIRY_STORAGE_KEY), DEFAULT_ENQUIRIES);
+  if (!canUseStorage()) {
+    return clone(DEFAULT_ENQUIRIES);
+  }
+
+  return safeParse(
+    localStorage.getItem(ENQUIRY_STORAGE_KEY),
+    DEFAULT_ENQUIRIES
+  );
 }
 
 /**
- * Persist enquiries to localStorage.
+ * Persists enquiry statistics into browser cache.
+ *
+ * @param {Object} enquiries
  */
 function writeLocalEnquiries(enquiries) {
   if (!canUseStorage()) return;
 
   try {
-    const safeValue = Array.isArray(enquiries)
-      ? enquiries
-      : clone(DEFAULT_ENQUIRIES);
-
-    localStorage.setItem(ENQUIRY_STORAGE_KEY, JSON.stringify(safeValue));
+    localStorage.setItem(
+      ENQUIRY_STORAGE_KEY,
+      JSON.stringify(enquiries)
+    );
   } catch (error) {
-    console.warn('[DataService] Failed to write enquiries to localStorage:', error);
+    console.warn(
+      '[DataService] Failed to save enquiries:',
+      error
+    );
   }
 }
 
@@ -171,11 +239,25 @@ function writeLocalEnquiries(enquiries) {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Normalizes remote/local payload into a consistent store shape.
+ * Normalizes remote payloads into a consistent structure.
  *
- * Supported payload formats:
- * 1) { products: [...], enquiries: [...] }
- * 2) [...]  // product-only legacy format
+ * Supported formats:
+ *
+ * Format 1:
+ * {
+ *   products: [],
+ *   enquiries: {}
+ * }
+ *
+ * Format 2:
+ * []
+ *
+ * @param {*} payload
+ *
+ * @returns {{
+ *   products:Array,
+ *   enquiries:Object
+ * }}
  */
 function normalize(payload) {
   if (isObject(payload)) {
@@ -184,16 +266,16 @@ function normalize(payload) {
         ? payload.products
         : clone(FALLBACK_PRODUCTS),
 
-      enquiries: Array.isArray(payload.enquiries)
+      enquiries: isObject(payload.enquiries)
         ? payload.enquiries
-        : readLocalEnquiries(),
+        : clone(DEFAULT_ENQUIRIES),
     };
   }
 
   if (Array.isArray(payload)) {
     return {
       products: payload,
-      enquiries: readLocalEnquiries(),
+      enquiries: clone(DEFAULT_ENQUIRIES),
     };
   }
 
@@ -204,37 +286,46 @@ function normalize(payload) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Fallback Builders                                                          */
+/* Fallback Store                                                             */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Returns a guaranteed valid store object using local cache or hardcoded
- * fallback defaults.
+ * Builds a guaranteed valid dashboard store.
+ *
+ * Resolution order:
+ *
+ * 1. Cached local data.
+ * 2. Hardcoded fallback data.
+ *
+ * @returns {{
+ *   products:Array,
+ *   enquiries:Object,
+ *   source:string,
+ *   error:null
+ * }}
  */
-function buildLocalOrFallbackStore() {
+function buildFallbackStore() {
   const cachedProducts = readLocalProducts();
   const cachedEnquiries = readLocalEnquiries();
 
-  if (Array.isArray(cachedProducts) && cachedProducts.length > 0) {
+  if (
+    Array.isArray(cachedProducts) &&
+    cachedProducts.length > 0
+  ) {
     return {
       products: cachedProducts,
-      enquiries: Array.isArray(cachedEnquiries)
-        ? cachedEnquiries
-        : clone(DEFAULT_ENQUIRIES),
+      enquiries: cachedEnquiries,
       source: 'cache',
       error: null,
     };
   }
 
-  const fallbackProducts = clone(FALLBACK_PRODUCTS);
-  const fallbackEnquiries = clone(DEFAULT_ENQUIRIES);
-
-  writeLocalProducts(fallbackProducts);
-  writeLocalEnquiries(fallbackEnquiries);
+  writeLocalProducts(FALLBACK_PRODUCTS);
+  writeLocalEnquiries(DEFAULT_ENQUIRIES);
 
   return {
-    products: fallbackProducts,
-    enquiries: fallbackEnquiries,
+    products: clone(FALLBACK_PRODUCTS),
+    enquiries: clone(DEFAULT_ENQUIRIES),
     source: 'fallback',
     error: null,
   };
@@ -245,32 +336,29 @@ function buildLocalOrFallbackStore() {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Fetch store data.
+ * Retrieves dashboard data.
  *
- * Strategy:
- * 1) If remote sync is disabled -> use local/fallback immediately
- * 2) If remote sync is enabled -> try remote GET
- * 3) If remote GET fails -> use local/fallback
+ * Flow:
  *
- * This avoids CORS noise during local development and keeps the dashboard
- * fully usable offline.
+ * 1. Attempt remote fetch.
+ * 2. Normalize payload.
+ * 3. Cache successful response locally.
+ * 4. Return remote data.
+ *
+ * If remote fetch fails:
+ *
+ * -> use local cache
+ * -> otherwise use fallback data
+ *
+ * @returns {Promise<Object>}
  */
 export async function fetchStore() {
-  /**
-   * If remote sync is not enabled, do not attempt browser fetch.
-   * This is the key fix for your current console spam.
-   */
   if (!SHOULD_USE_REMOTE) {
-    if (IS_DEV) {
-      console.info(
-        '[DataService] Remote sync disabled. Using local cache/fallback store.'
-      );
-    }
-    return buildLocalOrFallbackStore();
+    return buildFallbackStore();
   }
 
   try {
-    const res = await fetch(JSON_URL, {
+    const response = await fetch(JSON_URL, {
       method: 'GET',
       cache: 'no-store',
       headers: {
@@ -278,12 +366,23 @@ export async function fetchStore() {
       },
     });
 
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
+    if (!response.ok) {
+      throw new Error(
+        `HTTP ${response.status}`
+      );
     }
 
-    const raw = await res.json();
-    const data = normalize(raw);
+    const raw = await response.json();
+
+    /**
+     * myjson.online typically wraps payload inside:
+     * {
+     *   data: { ... }
+     * }
+     */
+    const payload = raw.data || raw;
+
+    const data = normalize(payload);
 
     writeLocalProducts(data.products);
     writeLocalEnquiries(data.enquiries);
@@ -294,15 +393,12 @@ export async function fetchStore() {
       error: null,
     };
   } catch (error) {
-    const errorMsg =
-      error instanceof Error ? error.message : 'Unknown fetch error';
-
     console.warn(
-      '[DataService] Remote fetch failed. Falling back to local cache:',
-      errorMsg
+      '[DataService] Remote fetch failed:',
+      error
     );
 
-    return buildLocalOrFallbackStore();
+    return buildFallbackStore();
   }
 }
 
@@ -311,38 +407,40 @@ export async function fetchStore() {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Save store data.
+ * Persists dashboard data.
  *
- * Behavior:
- * - Always writes to localStorage first (so UI remains fast/offline-safe)
- * - Only attempts remote PUT if remote sync is explicitly enabled
+ * Save strategy:
  *
- * Return values:
- * - { success: true, source: 'local' } when local-only mode is active
- * - { success: true, source: 'remote' } when remote sync succeeds
- * - { success: true, source: 'local', warning: ... } when remote sync fails
+ * 1. Save locally immediately.
+ * 2. Attempt remote synchronization.
+ * 3. Preserve local copy if remote fails.
+ *
+ * @param {{
+ *   products:Array,
+ *   enquiries:Object
+ * }} payload
+ *
+ * @returns {Promise<Object>}
  */
-export async function pushStore({ products = [], enquiries = [] } = {}) {
-  const safeProducts = Array.isArray(products) ? products : [];
-  const safeEnquiries = Array.isArray(enquiries)
+export async function pushStore({
+  products = [],
+  enquiries = DEFAULT_ENQUIRIES,
+} = {}) {
+  const safeProducts = Array.isArray(products)
+    ? products
+    : [];
+
+  const safeEnquiries = isObject(enquiries)
     ? enquiries
     : clone(DEFAULT_ENQUIRIES);
 
-  /* Always persist locally first */
+  /**
+   * Always save locally first.
+   */
   writeLocalProducts(safeProducts);
   writeLocalEnquiries(safeEnquiries);
 
-  /**
-   * If remote sync is disabled, treat local save as the successful result.
-   * This removes the PUT CORS error you are currently seeing.
-   */
   if (!SHOULD_USE_REMOTE) {
-    if (IS_DEV) {
-      console.info(
-        '[DataService] Remote sync disabled. Data saved locally only.'
-      );
-    }
-
     return {
       success: true,
       source: 'local',
@@ -352,16 +450,12 @@ export async function pushStore({ products = [], enquiries = [] } = {}) {
 
   try {
     const payload = {
-      _tenant: {
-        id: 'tenant_slug',
-        currency: 'INR',
-      },
       products: safeProducts,
       enquiries: safeEnquiries,
     };
 
-    const res = await fetch(JSON_URL, {
-      method: 'PUT',
+    const response = await fetch(JSON_URL, {
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
@@ -369,8 +463,10 @@ export async function pushStore({ products = [], enquiries = [] } = {}) {
       body: JSON.stringify(payload),
     });
 
-    if (!res.ok) {
-      throw new Error(`Save failed (${res.status})`);
+    if (!response.ok) {
+      throw new Error(
+        `Save failed (${response.status})`
+      );
     }
 
     return {
@@ -380,14 +476,15 @@ export async function pushStore({ products = [], enquiries = [] } = {}) {
     };
   } catch (error) {
     console.warn(
-      '[DataService] Remote sync failed. Data remains saved locally:',
+      '[DataService] Remote sync failed:',
       error
     );
 
     return {
       success: true,
       source: 'local',
-      warning: 'Saved locally only. Remote sync failed.',
+      warning:
+        'Saved locally. Remote synchronization failed.',
     };
   }
 }
@@ -397,14 +494,14 @@ export async function pushStore({ products = [], enquiries = [] } = {}) {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Clears only the app-owned local storage keys and reloads the page.
- * We do NOT call localStorage.clear() because that could wipe unrelated data.
+ * Removes application-owned cached data.
+ *
+ * Only dashboard keys are removed.
+ * localStorage.clear() is intentionally avoided.
  */
 export function resetStore() {
   if (!canUseStorage()) {
-    if (typeof window !== 'undefined') {
-      window.location.reload();
-    }
+    window.location.reload();
     return;
   }
 
@@ -412,10 +509,11 @@ export function resetStore() {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(ENQUIRY_STORAGE_KEY);
   } catch (error) {
-    console.warn('[DataService] Failed to reset local store:', error);
+    console.warn(
+      '[DataService] Failed to reset store:',
+      error
+    );
   }
 
-  if (typeof window !== 'undefined') {
-    window.location.reload();
-  }
+  window.location.reload();
 }
