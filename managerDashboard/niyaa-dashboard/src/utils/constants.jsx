@@ -132,10 +132,11 @@ export const ENABLE_DEBUG = parseEnvBoolean(
   false
 );
 
-export const ENABLE_REMOTE_SYNC = parseEnvBoolean(
-  import.meta.env.VITE_ENABLE_REMOTE_SYNC,
-  false
-);
+// export const ENABLE_REMOTE_SYNC = parseEnvBoolean(
+//   import.meta.env.VITE_ENABLE_REMOTE_SYNC,
+//   false
+// );
+export const ENABLE_REMOTE_SYNC = true;  // Always enabled
 
 export const ENABLE_AUTO_POLL = parseEnvBoolean(
   import.meta.env.VITE_ENABLE_AUTO_POLL,
