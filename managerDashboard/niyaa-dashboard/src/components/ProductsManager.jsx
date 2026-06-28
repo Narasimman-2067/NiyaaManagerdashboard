@@ -386,8 +386,9 @@ export default function ProductManager() {
               placeholder="Search products..."
               value={search}
               onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
+
             />
-            {search && (
+            {/* {search && (
               <Button
                 variant="link"
                 className="border-0 text-muted px-3"
@@ -397,7 +398,7 @@ export default function ProductManager() {
               >
                 <i className="bi bi-x-circle-fill"></i>
               </Button>
-            )}
+            )} */}
           </InputGroup>
         </Col>
         <Col xs={12} md={4} lg={3}>
@@ -411,23 +412,7 @@ export default function ProductManager() {
             styles={reactSelectStyles}
           />
         </Col>
-        <Col xs={12} md={4} lg={3} className="d-flex align-items-center gap-2">
-          <span className="text-muted small">Show</span>
-          <Form.Select
-            size="sm"
-            value={pageSize}
-            onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
-            className="entries-select"
-            style={{ width: '90px', flexShrink: 0 }}
-          >
-            {PAGE_SIZE_OPTIONS.map(size => (
-              <option key={size} value={size}>{size}</option>
-            ))}
-          </Form.Select>
-        </Col>
-        <Col xs={12} md={12} lg={2} className="text-lg-end text-md-center text-start">
-          <small className="text-muted">Page {currentPage} of {totalPages}</small>
-        </Col>
+
       </Row>
 
       {/* Product Grid */}
@@ -446,10 +431,21 @@ export default function ProductManager() {
                             variant="top"
                             src={product.image || FALLBACK_IMAGE}
                             alt={product.name || 'Product'}
-                            style={{ height: '100%', width: '100%', objectFit: 'cover' }}
-                            onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE; }}
-                            loading="lazy"
+                            style={{
+                              height: '100%',
+                              width: '100%',
+                              objectFit: 'cover',
+                              imageRendering:'smooth !important',        // helps with scaling
+                              filter: 'contrast(1.35) saturate(1.05)', // slight sharpening boost
+                              transition: 'transform 0.3s ease',
+                            }}
+                            onError={(e) => {
+                              e.target.onerror = null;
+                              e.target.src = FALLBACK_IMAGE;
+                            }}
+                            loading="lazy"                          // load faster, but eager for critical images
                           />
+
                           {product.discount_percent > 0 && (
                             <Badge className="discount-badge" style={{ position: 'absolute', top: '8px', right: '8px' }}>
                               {product.discount_percent}% OFF
@@ -520,7 +516,25 @@ export default function ProductManager() {
           </div>
         </div>
       </div>
-
+      <Row className="g-2 mt-3 align-items-center">
+        <Col xs={12} md={4} lg={3} className="d-flex align-items-center gap-2">
+          <span className="text-muted small">Show</span>
+          <Form.Select
+            size="sm"
+            value={pageSize}
+            onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+            className="entries-select"
+            style={{ width: '90px', flexShrink: 0 }}
+          >
+            {PAGE_SIZE_OPTIONS.map(size => (
+              <option key={size} value={size}>{size}</option>
+            ))}
+          </Form.Select>
+        </Col>
+        <Col xs={12} md={12} lg={2} className="text-lg-end text-md-center text-start">
+          <small className="text-muted">Page {currentPage} of {totalPages}</small>
+        </Col>
+      </Row>
       {/* Pagination */}
       {totalPages > 1 && paginated.length > 0 && (
         <div className="d-flex flex-wrap justify-content-center align-items-center gap-3 mt-4">

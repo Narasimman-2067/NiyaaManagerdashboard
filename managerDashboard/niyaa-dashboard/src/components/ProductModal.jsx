@@ -314,8 +314,8 @@ const ProductModal = memo(function ProductModal({
                     <img
                       src={imagePreview}
                       alt="Preview"
-                      className="img-fluid rounded-3 border shadow-sm"
-                      style={{ maxHeight: '220px', objectFit: 'contain' }}
+                      className="img-fluid rounded-3 border shadow-sm edit-image"
+                      style={{ maxHeight: '200px', objectFit: 'contain ' }}
                     />
                     <Button
                       type="button"

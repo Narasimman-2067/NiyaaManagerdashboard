@@ -131,13 +131,36 @@ body {
   min-height: 100vh;
 }
 
+/* Product card images – crisp & filled */
 img {
-  max-width: 100%;
-  display: block;
-  object-fit: cover !important;
-  object-position: center !important;
+object-fit: cover !important;         
+object-position: center;      
+transition: transform 1.3s ease;
+} 
+
+.edit-image{
+width:80% !important;
+height:100% !important;
+object-fit: contain !important;         
+object-position: center;     
+transition: transform 1.3s ease;
+border:2px solid white !important;
+border-radius: 100% !important; 
+
 }
 
+/* Optional: subtle zoom on hover */
+img:hover {
+  transform: scale(1.03);
+}
+
+/* Optional: zoom on hover (subtle) */
+.product-card:hover .card-img-top {
+  transform: scale(1.05);
+}
+button,img{
+cursor:pointer;
+}
 button,
 input,
 select,
@@ -343,7 +366,7 @@ a {
   margin: 0.85rem;
   border-radius: 26px;
   background: var(--bg-surface);
-  backdrop-filter: blur(18px);
+  backdrop-filter: blur(48px);
   -webkit-backdrop-filter: blur(18px);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
