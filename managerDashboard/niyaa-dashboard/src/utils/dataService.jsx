@@ -1,518 +1,291 @@
-/**
- * ============================================================================
- * DATA SERVICE
- * ============================================================================
- *
- * Purpose
- * ----------------------------------------------------------------------------
- * Centralized storage layer for the dashboard.
- *
- * Responsibilities:
- *
- * 1. Fetch dashboard data.
- * 2. Save dashboard data.
- * 3. Maintain browser cache.
- * 4. Synchronize with remote storage through Vercel API.
- * 5. Provide fallback data when remote services are unavailable.
- *
- *
- * Architecture
- * ----------------------------------------------------------------------------
- *
- * React Components
- *        ↓
- * dataService.js
- *        ↓
- * /api/store (Vercel Serverless API)
- *        ↓
- * myjson.online
- *
- *
- * Why this service exists
- * ----------------------------------------------------------------------------
- *
- * Components should NEVER:
- *
- * - call fetch() directly
- * - access localStorage directly
- * - know API endpoints
- *
- * All storage concerns must remain isolated here.
- *
- * Benefits:
- *
- * ✓ Single source of truth
- * ✓ Easier maintenance
- * ✓ Easier migration to database later
- * ✓ Centralized error handling
- * ✓ Offline-friendly behavior
- *
- * ============================================================================
- */
-
+// src/utils/dataService.js
+import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { db, isFirebaseConfigured } from './firebase';
 import {
-  JSON_URL,
-  STORAGE_KEY,
-  ENQUIRY_STORAGE_KEY,
   FALLBACK_PRODUCTS,
   DEFAULT_ENQUIRIES,
-  ENABLE_REMOTE_SYNC,
-} from '../utils/constants';
+  STORAGE_KEY,
+  ENQUIRY_STORAGE_KEY,
+} from './constants';
 
-/* -------------------------------------------------------------------------- */
-/* Configuration                                                              */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Determines whether remote synchronization should be attempted.
- */
-const SHOULD_USE_REMOTE =
-  ENABLE_REMOTE_SYNC &&
-  Boolean(JSON_URL);
-
-/* -------------------------------------------------------------------------- */
-/* Utility Helpers                                                            */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Creates a deep clone of an object or array.
- *
- * Prevents accidental mutation of imported constants.
- *
- * @param {*} value
- * @returns {*}
- */
-function clone(value) {
-  try {
-    return JSON.parse(JSON.stringify(value));
-  } catch {
-    return value;
+// ------------------------------------------------------------------
+// ID generation – primary key is 'rowid'
+// ------------------------------------------------------------------
+function generateRowId() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
   }
+  return `prod_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
 /**
- * Determines whether browser localStorage can be used.
- *
- * Protects the application from runtime errors in:
- * - SSR environments
- * - Restricted browser sessions
- *
- * @returns {boolean}
+ * Ensure every product has a unique `rowid`.
+ * Also keeps any existing `id` for compatibility, but `rowid` is the
+ * master key used for all CRUD operations.
  */
-function canUseStorage() {
+function ensureProductRowIds(products) {
+  if (!Array.isArray(products)) return { products: [], mutated: true };
+
+  const seen = new Set();
+  let mutated = false;
+
+  const result = products.map((item) => {
+    const safe = item && typeof item === 'object' ? { ...item } : {};
+    // Prefer existing rowid, then id, else generate new
+    let rowid = safe.rowid || safe.id;
+
+    if (!rowid || typeof rowid !== 'string' || seen.has(rowid)) {
+      rowid = generateRowId();
+      mutated = true;
+    }
+    seen.add(rowid);
+    return {
+      ...safe,
+      rowid,               // primary key
+      id: rowid,           // alias for backward compatibility
+      last_updated: safe.last_updated || new Date().toISOString(),
+    };
+  });
+
+  return { products: result, mutated };
+}
+
+// ------------------------------------------------------------------
+// Local Storage helpers
+// ------------------------------------------------------------------
+const canUseStorage = () => {
   try {
-    return (
-      typeof window !== 'undefined' &&
-      typeof localStorage !== 'undefined'
-    );
+    return typeof window !== 'undefined' && !!window.localStorage;
   } catch {
     return false;
   }
-}
+};
 
-/**
- * Safely parses JSON strings.
- *
- * Returns fallback value when parsing fails.
- *
- * @param {string|null} raw
- * @param {*} fallback
- *
- * @returns {*}
- */
-function safeParse(raw, fallback) {
-  if (!raw) return clone(fallback);
-
+function safeJSONParse(str, fallback) {
   try {
-    return JSON.parse(raw);
-  } catch (error) {
-    console.warn(
-      '[DataService] Failed to parse JSON:',
-      error
-    );
-
-    return clone(fallback);
+    return str ? JSON.parse(str) : fallback;
+  } catch {
+    return fallback;
   }
 }
 
-/**
- * Checks whether a value is a plain object.
- *
- * Excludes:
- * - arrays
- * - null
- *
- * @param {*} value
- *
- * @returns {boolean}
- */
-function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === 'object' &&
-    !Array.isArray(value)
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Local Storage                                                              */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Retrieves products from browser cache.
- *
- * @returns {Array|null}
- */
 function readLocalProducts() {
-  if (!canUseStorage()) return null;
-
-  return safeParse(
-    localStorage.getItem(STORAGE_KEY),
-    null
-  );
+  if (!canUseStorage()) {
+    const { products } = ensureProductRowIds([...FALLBACK_PRODUCTS]);
+    return products;
+  }
+  const raw = localStorage.getItem(STORAGE_KEY);
+  const parsed = safeJSONParse(raw, [...FALLBACK_PRODUCTS]);
+  const { products, mutated } = ensureProductRowIds(parsed);
+  if (mutated) writeLocalProducts(products);
+  return products;
 }
 
-/**
- * Persists products into browser cache.
- *
- * Local persistence always happens before
- * remote synchronization.
- *
- * @param {Array} products
- */
 function writeLocalProducts(products) {
   if (!canUseStorage()) return;
-  if (!Array.isArray(products)) return;
-
-  try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(products)
-    );
-  } catch (error) {
-    console.warn(
-      '[DataService] Failed to save products:',
-      error
-    );
-  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.isArray(products) ? products : []));
 }
 
-/**
- * Retrieves enquiry statistics from browser cache.
- *
- * @returns {Object}
- */
 function readLocalEnquiries() {
-  if (!canUseStorage()) {
-    return clone(DEFAULT_ENQUIRIES);
-  }
+  if (!canUseStorage()) return { ...DEFAULT_ENQUIRIES };
+  const raw = localStorage.getItem(ENQUIRY_STORAGE_KEY);
+  return safeJSONParse(raw, { ...DEFAULT_ENQUIRIES });
+}
 
-  return safeParse(
-    localStorage.getItem(ENQUIRY_STORAGE_KEY),
-    DEFAULT_ENQUIRIES
+function writeLocalEnquiries(enquiries) {
+  if (!canUseStorage()) return;
+  localStorage.setItem(
+    ENQUIRY_STORAGE_KEY,
+    JSON.stringify(enquiries && typeof enquiries === 'object' ? enquiries : { ...DEFAULT_ENQUIRIES })
   );
 }
 
-/**
- * Persists enquiry statistics into browser cache.
- *
- * @param {Object} enquiries
- */
-function writeLocalEnquiries(enquiries) {
-  if (!canUseStorage()) return;
+// ------------------------------------------------------------------
+// Firestore helpers
+// ------------------------------------------------------------------
+const getDataDoc = () => (isFirebaseConfigured && db ? doc(db, 'dashboard', 'data') : null);
 
-  try {
-    localStorage.setItem(
-      ENQUIRY_STORAGE_KEY,
-      JSON.stringify(enquiries)
-    );
-  } catch (error) {
-    console.warn(
-      '[DataService] Failed to save enquiries:',
-      error
-    );
-  }
-}
-
-/* -------------------------------------------------------------------------- */
-/* Data Normalization                                                         */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Normalizes remote payloads into a consistent structure.
- *
- * Supported formats:
- *
- * Format 1:
- * {
- *   products: [],
- *   enquiries: {}
- * }
- *
- * Format 2:
- * []
- *
- * @param {*} payload
- *
- * @returns {{
- *   products:Array,
- *   enquiries:Object
- * }}
- */
-function normalize(payload) {
-  if (isObject(payload)) {
-    return {
-      products: Array.isArray(payload.products)
-        ? payload.products
-        : clone(FALLBACK_PRODUCTS),
-
-      enquiries: isObject(payload.enquiries)
-        ? payload.enquiries
-        : clone(DEFAULT_ENQUIRIES),
-    };
-  }
-
-  if (Array.isArray(payload)) {
-    return {
-      products: payload,
-      enquiries: clone(DEFAULT_ENQUIRIES),
-    };
-  }
-
+function normalizeDocData(docData) {
   return {
-    products: clone(FALLBACK_PRODUCTS),
-    enquiries: clone(DEFAULT_ENQUIRIES),
+    products: Array.isArray(docData?.products) ? docData.products : [],
+    enquiries: docData?.enquiries && typeof docData.enquiries === 'object'
+      ? docData.enquiries
+      : { ...DEFAULT_ENQUIRIES },
   };
 }
 
-/* -------------------------------------------------------------------------- */
-/* Fallback Store                                                             */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Builds a guaranteed valid dashboard store.
- *
- * Resolution order:
- *
- * 1. Cached local data.
- * 2. Hardcoded fallback data.
- *
- * @returns {{
- *   products:Array,
- *   enquiries:Object,
- *   source:string,
- *   error:null
- * }}
- */
-function buildFallbackStore() {
-  const cachedProducts = readLocalProducts();
-  const cachedEnquiries = readLocalEnquiries();
-
-  if (
-    Array.isArray(cachedProducts) &&
-    cachedProducts.length > 0
-  ) {
+// ------------------------------------------------------------------
+// Fetch data (remote + cache fallback)
+// ------------------------------------------------------------------
+export async function fetchDashboardData() {
+  // If Firebase is not configured, use localStorage only
+  if (!isFirebaseConfigured || !db) {
+    console.warn('Firebase not configured → using localStorage');
     return {
-      products: cachedProducts,
-      enquiries: cachedEnquiries,
-      source: 'cache',
+      products: readLocalProducts(),
+      enquiries: readLocalEnquiries(),
+      source: 'local',
       error: null,
     };
   }
 
-  writeLocalProducts(FALLBACK_PRODUCTS);
-  writeLocalEnquiries(DEFAULT_ENQUIRIES);
-
-  return {
-    products: clone(FALLBACK_PRODUCTS),
-    enquiries: clone(DEFAULT_ENQUIRIES),
-    source: 'fallback',
-    error: null,
-  };
-}
-
-/* -------------------------------------------------------------------------- */
-/* Public API - Fetch                                                         */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Retrieves dashboard data.
- *
- * Flow:
- *
- * 1. Attempt remote fetch.
- * 2. Normalize payload.
- * 3. Cache successful response locally.
- * 4. Return remote data.
- *
- * If remote fetch fails:
- *
- * -> use local cache
- * -> otherwise use fallback data
- *
- * @returns {Promise<Object>}
- */
-export async function fetchStore() {
-  if (!SHOULD_USE_REMOTE) {
-    return buildFallbackStore();
-  }
-
+  const DATA_DOC = getDataDoc();
   try {
-    const response = await fetch(JSON_URL, {
-      method: 'GET',
-      cache: 'no-store',
-      headers: {
-        Accept: 'application/json',
-      },
-    });
+    const docSnap = await getDoc(DATA_DOC);
 
-    if (!response.ok) {
-      throw new Error(
-        `HTTP ${response.status}`
-      );
+    if (docSnap.exists()) {
+      let data = normalizeDocData(docSnap.data());
+      // Ensure every product has a rowid
+      const { products: safeProducts, mutated } = ensureProductRowIds(data.products);
+
+      // If Firestore has no products, seed with fallback
+      if (safeProducts.length === 0) {
+        const fallback = ensureProductRowIds([...FALLBACK_PRODUCTS]);
+        data.products = fallback.products;
+        await setDoc(DATA_DOC, {
+          products: data.products,
+          enquiries: data.enquiries,
+          updatedAt: new Date().toISOString(),
+        });
+      } else {
+        data.products = safeProducts;
+      }
+
+      // Always update local cache with fresh data
+      writeLocalProducts(data.products);
+      writeLocalEnquiries(data.enquiries);
+
+      // If we added/mutated rowids, push them back to Firestore
+      if (mutated) {
+        await setDoc(DATA_DOC, { products: data.products }, { merge: true });
+      }
+
+      return { ...data, source: 'firestore', error: null };
     }
 
-    const raw = await response.json();
+    // First‑time setup: seed with fallback products
+    const { products: seeded } = ensureProductRowIds([...FALLBACK_PRODUCTS]);
+    const seedData = { products: seeded, enquiries: { ...DEFAULT_ENQUIRIES } };
 
-    /**
-     * myjson.online typically wraps payload inside:
-     * {
-     *   data: { ... }
-     * }
-     */
-    const payload = raw.data || raw;
+    await setDoc(DATA_DOC, { ...seedData, updatedAt: new Date().toISOString() });
 
-    const data = normalize(payload);
+    writeLocalProducts(seedData.products);
+    writeLocalEnquiries(seedData.enquiries);
 
-    writeLocalProducts(data.products);
-    writeLocalEnquiries(data.enquiries);
-
-    return {
-      ...data,
-      source: 'remote',
-      error: null,
-    };
+    return { ...seedData, source: 'seed', error: null };
   } catch (error) {
-    console.warn(
-      '[DataService] Remote fetch failed:',
-      error
-    );
-
-    return buildFallbackStore();
+    console.error('Firestore fetch error:', error);
+    // Fallback to local cache
+    return {
+      products: readLocalProducts(),
+      enquiries: readLocalEnquiries(),
+      source: 'cache',
+      error: 'Remote unavailable. Using local cache.',
+    };
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Public API - Save                                                          */
-/* -------------------------------------------------------------------------- */
+// ------------------------------------------------------------------
+// Save data (local + Firestore, merge)
+// ------------------------------------------------------------------
+export async function saveDashboardData({ products = [], enquiries = DEFAULT_ENQUIRIES } = {}) {
+  // Ensure every product has a rowid
+  const { products: safeProducts } = ensureProductRowIds(Array.isArray(products) ? products : []);
+  const safeEnquiries = enquiries && typeof enquiries === 'object' ? enquiries : { ...DEFAULT_ENQUIRIES };
 
-/**
- * Persists dashboard data.
- *
- * Save strategy:
- *
- * 1. Save locally immediately.
- * 2. Attempt remote synchronization.
- * 3. Preserve local copy if remote fails.
- *
- * @param {{
- *   products:Array,
- *   enquiries:Object
- * }} payload
- *
- * @returns {Promise<Object>}
- */
-export async function pushStore({
-  products = [],
-  enquiries = DEFAULT_ENQUIRIES,
-} = {}) {
-  const safeProducts = Array.isArray(products)
-    ? products
-    : [];
-
-  const safeEnquiries = isObject(enquiries)
-    ? enquiries
-    : clone(DEFAULT_ENQUIRIES);
-
-  /**
-   * Always save locally first.
-   */
+  // Always save locally first (for immediate persistence)
   writeLocalProducts(safeProducts);
   writeLocalEnquiries(safeEnquiries);
 
-  if (!SHOULD_USE_REMOTE) {
-    return {
-      success: true,
-      source: 'local',
-      warning: null,
-    };
+  if (!isFirebaseConfigured || !db) {
+    console.log('Firebase disabled → saved only to localStorage');
+    return { success: true, source: 'local', products: safeProducts };
   }
 
+  const DATA_DOC = getDataDoc();
   try {
-    const payload = {
-      products: safeProducts,
-      enquiries: safeEnquiries,
-    };
+    console.log('Saving to Firestore... Products count:', safeProducts.length);
 
-    const response = await fetch(JSON_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
+    await setDoc(
+      DATA_DOC,
+      {
+        products: safeProducts,
+        enquiries: safeEnquiries,
+        updatedAt: new Date().toISOString(),
       },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        `Save failed (${response.status})`
-      );
-    }
-
-    return {
-      success: true,
-      source: 'remote',
-      warning: null,
-    };
-  } catch (error) {
-    console.warn(
-      '[DataService] Remote sync failed:',
-      error
+      { merge: true }
     );
 
+    console.log('✅ Successfully saved to Firestore');
+    return { success: true, source: 'firestore', products: safeProducts };
+  } catch (error) {
+    console.error('❌ Firestore save failed:', error);
     return {
       success: true,
-      source: 'local',
-      warning:
-        'Saved locally. Remote synchronization failed.',
+      source: 'cache',
+      warning: 'Saved locally. Firestore sync failed.',
+      products: safeProducts,
     };
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Public API - Reset                                                         */
-/* -------------------------------------------------------------------------- */
+// ------------------------------------------------------------------
+// Replace data (overwrite entire Firestore doc + local storage)
+// ------------------------------------------------------------------
+export async function replaceDashboardData({ products = [], enquiries = DEFAULT_ENQUIRIES } = {}) {
+  // Ensure every product has a rowid
+  const { products: safeProducts } = ensureProductRowIds(Array.isArray(products) ? products : []);
+  const safeEnquiries = enquiries && typeof enquiries === 'object' ? enquiries : { ...DEFAULT_ENQUIRIES };
 
-/**
- * Removes application-owned cached data.
- *
- * Only dashboard keys are removed.
- * localStorage.clear() is intentionally avoided.
- */
-export function resetStore() {
-  if (!canUseStorage()) {
-    window.location.reload();
-    return;
+  // Update local storage
+  writeLocalProducts(safeProducts);
+  writeLocalEnquiries(safeEnquiries);
+
+  if (!isFirebaseConfigured || !db) {
+    console.log('Firebase disabled → saved only to localStorage');
+    return { success: true, source: 'local', products: safeProducts };
   }
 
+  const DATA_DOC = getDataDoc();
   try {
+    console.log('Replacing Firestore data... Products count:', safeProducts.length);
+
+    // Overwrite the entire document (no merge)
+    await setDoc(DATA_DOC, {
+      products: safeProducts,
+      enquiries: safeEnquiries,
+      updatedAt: new Date().toISOString(),
+    });
+
+    console.log('✅ Successfully replaced Firestore data');
+    return { success: true, source: 'firestore', products: safeProducts };
+  } catch (error) {
+    console.error('❌ Firestore replace failed:', error);
+    return {
+      success: false,
+      source: 'cache',
+      warning: 'Failed to replace data in Firestore.',
+      products: safeProducts,
+    };
+  }
+}
+
+// ------------------------------------------------------------------
+// Reset – delete Firestore doc and clear localStorage, then reload
+// ------------------------------------------------------------------
+export async function resetDashboardData() {
+  try {
+    if (isFirebaseConfigured && db) {
+      const DATA_DOC = getDataDoc();
+      if (DATA_DOC) await deleteDoc(DATA_DOC);
+    }
+  } catch (e) {
+    console.warn('Reset warning:', e);
+  }
+
+  if (canUseStorage()) {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(ENQUIRY_STORAGE_KEY);
-  } catch (error) {
-    console.warn(
-      '[DataService] Failed to reset store:',
-      error
-    );
   }
 
   window.location.reload();

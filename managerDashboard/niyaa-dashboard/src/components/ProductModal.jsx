@@ -1,17 +1,12 @@
-import React, { useState, useEffect, useCallback, memo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, memo, useRef, useMemo } from 'react';
 import { Modal, Button } from 'react-bootstrap';
+import CreatableSelect from 'react-select/creatable';
+import Select from 'react-select';
 import { toBase64 } from '../utils/utils';
+import { buildSelectStyles, portalSelectProps } from '../utils/selectStyles';
 
-/* -------------------------------------------------------------------------- */
-/* Constants                                                                  */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Default empty form state used for "Add Product" mode.
- * Keeping this in one place avoids repeated object duplication and makes reset
- * logic easier to maintain.
- */
 const EMPTY_FORM = {
+  rowid: '',
   name: '',
   category: '',
   amount: '',
@@ -22,26 +17,17 @@ const EMPTY_FORM = {
   status: 'in_stock',
 };
 
-/**
- * Maximum upload size for product image (in bytes).
- * Adjust if you want to allow larger images.
- */
-const MAX_IMAGE_SIZE = 2 * 1024 * 1024; // 2 MB
+const STATUS_OPTIONS = [
+  { value: 'in_stock', label: 'In Stock' },
+  { value: 'no_stock', label: 'No Stock' },
+];
 
-/* -------------------------------------------------------------------------- */
-/* Helpers                                                                    */
-/* -------------------------------------------------------------------------- */
+const MAX_IMAGE_SIZE = 2 * 1024 * 1024;
 
-/**
- * Safely converts an incoming product object into the modal form shape.
- * This prevents undefined/null values from leaking into controlled inputs.
- */
 function buildFormFromProduct(product) {
-  if (!product || typeof product !== 'object') {
-    return { ...EMPTY_FORM };
-  }
-
+  if (!product || typeof product !== 'object') return { ...EMPTY_FORM };
   return {
+    rowid: product.rowid || product.id || '',
     name: product.name ?? '',
     category: product.category ?? '',
     amount: product.amount ?? '',
@@ -53,18 +39,10 @@ function buildFormFromProduct(product) {
   };
 }
 
-/**
- * Normalizes number-like input values.
- * Returns 0 for invalid / empty values.
- */
 function toNumber(value) {
   const num = Number(value);
   return Number.isFinite(num) ? num : 0;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Component                                                                  */
-/* -------------------------------------------------------------------------- */
 
 const ProductModal = memo(function ProductModal({
   show,
@@ -72,158 +50,136 @@ const ProductModal = memo(function ProductModal({
   onSave,
   product,
   categories = [],
+  isSaving = false,
 }) {
   const [form, setForm] = useState(EMPTY_FORM);
   const [imagePreview, setImagePreview] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [newCategory, setNewCategory] = useState('');
+  const [errors, setErrors] = useState({});
   const fileInputRef = useRef(null);
 
-  /**
-   * When the modal opens or the product changes:
-   * - load edit values for existing product
-   * - reset to empty form for add mode
-   */
   useEffect(() => {
     const nextForm = buildFormFromProduct(product);
     setForm(nextForm);
     setImagePreview(nextForm.image || '');
-    setNewCategory('');
-    setIsSubmitting(false);
-
-    // Clear the file input so the same image can be re-selected if needed.
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+    setErrors({});
+    if (fileInputRef.current) fileInputRef.current.value = '';
   }, [product, show]);
 
-  /**
-   * Generic controlled input handler.
-   */
-  const handleChange = useCallback((event) => {
-    const { name, value } = event.target;
+  const categoryOptions = useMemo(() => {
+    const unique = Array.isArray(categories) ? [...new Set(categories.filter(Boolean))] : [];
+    return unique.map((cat) => ({ label: cat, value: cat }));
+  }, [categories]);
+
+  // ----- FIX: ensure new category is displayed even if not in options -----
+  const selectedCategory = useMemo(() => {
+    if (!form.category) return null;
+    const found = categoryOptions.find((opt) => opt.value === form.category);
+    if (found) return found;
+    // If not found, create a temporary option to display the new category
+    return { label: form.category, value: form.category };
+  }, [categoryOptions, form.category]);
+
+  const selectedStatus = STATUS_OPTIONS.find((opt) => opt.value === form.status) || STATUS_OPTIONS[0];
+
+  const handleChange = useCallback((e) => {
+    const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
+    setErrors((prev) => ({ ...prev, [name]: '' }));
   }, []);
 
-  /**
-   * Handles image upload and converts the image to base64 for storage.
-   * Includes basic validation for type + size to reduce bad uploads.
-   */
-  const handleFileChange = useCallback(async (event) => {
-    const file = event.target.files?.[0];
+  const handleCategoryChange = useCallback((selected) => {
+    setForm((prev) => ({ ...prev, category: selected?.value || '' }));
+    setErrors((prev) => ({ ...prev, category: '' }));
+  }, []);
 
+  const handleCategoryCreate = useCallback((inputValue) => {
+    // Set the new category immediately
+    setForm((prev) => ({ ...prev, category: inputValue }));
+    setErrors((prev) => ({ ...prev, category: '' }));
+  }, []);
+
+  const handleStatusChange = useCallback((selected) => {
+    setForm((prev) => ({ ...prev, status: selected?.value || 'in_stock' }));
+  }, []);
+
+  const handleFileChange = useCallback(async (e) => {
+    const file = e.target.files?.[0];
     if (!file) return;
-
-    const isImage = file.type.startsWith('image/');
-    if (!isImage) {
-      window.alert('Please select a valid image file.');
-      event.target.value = '';
+    if (!file.type.startsWith('image/')) {
+      window.alert('Please select an image file.');
+      e.target.value = '';
       return;
     }
-
     if (file.size > MAX_IMAGE_SIZE) {
-      window.alert('Image size must be less than 2 MB.');
-      event.target.value = '';
+      window.alert('Image must be < 2MB.');
+      e.target.value = '';
       return;
     }
-
     try {
       const base64 = await toBase64(file);
       setImagePreview(base64);
       setForm((prev) => ({ ...prev, image: base64 }));
-    } catch (error) {
-      console.error('[ProductModal] Failed to process image:', error);
-      window.alert('Failed to process image. Please try another file.');
+    } catch (err) {
+      console.error(err);
+      window.alert('Failed to process image.');
     } finally {
-      // Allow selecting the same file again if needed.
-      event.target.value = '';
+      e.target.value = '';
     }
   }, []);
 
-  /**
-   * Removes the current image from the form.
-   */
   const handleRemoveImage = useCallback(() => {
     setImagePreview('');
     setForm((prev) => ({ ...prev, image: '' }));
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
 
-  /**
-   * Handles form submit for both add/edit product flows.
-   * Supports async onSave handlers from the parent component.
-   */
+  const validateForm = useCallback(() => {
+    const newErrors = {};
+    if (!form.name.trim()) newErrors.name = 'Product name is required.';
+    if (!form.category.trim()) newErrors.category = 'Category is required.';
+    const amount = toNumber(form.amount);
+    if (amount < 0) newErrors.amount = 'Price must be a positive number.';
+    const discount = toNumber(form.discount_percent);
+    if (discount < 0 || discount > 100) newErrors.discount = 'Discount must be between 0 and 100.';
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  }, [form]);
+
   const handleSubmit = useCallback(
-    async (event) => {
-      event.preventDefault();
+    async (e) => {
+      e.preventDefault();
+      if (isSaving) return;
+      if (!validateForm()) return;
 
-      if (isSubmitting) return;
+      const payload = {
+        ...(form.rowid ? { rowid: form.rowid } : {}),
+        name: form.name.trim(),
+        category: form.category.trim(),
+        amount: toNumber(form.amount),
+        price: toNumber(form.price || form.amount),
+        discount_percent: Math.max(0, Math.min(100, toNumber(form.discount_percent))),
+        contents: form.contents?.trim?.() || '',
+        image: form.image || '',
+        status: form.status === 'no_stock' ? 'no_stock' : 'in_stock',
+        last_updated: new Date().toISOString(),
+      };
 
-      const name = form.name.trim();
-      const category = (newCategory.trim() || form.category || '').trim();
-
-      if (!name) {
-        window.alert('Product name is required.');
-        return;
-      }
-
-      if (!category) {
-        window.alert('Please select or enter a category.');
-        return;
-      }
-
-      setIsSubmitting(true);
-
-      try {
-        /**
-         * Keep both amount and price available because the rest of the app
-         * currently uses both keys in different places.
-         *
-         * If your business logic only needs one of them later, we can simplify
-         * this structure globally.
-         */
-        const priceValue = toNumber(form.price || form.amount);
-        const amountValue = toNumber(form.amount || form.price);
-
-        const payload = {
-          ...form,
-          name,
-          category,
-          amount: amountValue,
-          price: priceValue,
-          discount_percent: Math.max(0, Math.min(100, toNumber(form.discount_percent))),
-          contents: form.contents?.trim?.() || '',
-          image: form.image || '',
-          status: form.status === 'no_stock' ? 'no_stock' : 'in_stock',
-        };
-
-        if (typeof onSave === 'function') {
-          await onSave(payload);
-        }
-
-        setNewCategory('');
-      } catch (error) {
-        console.error('[ProductModal] Save failed:', error);
-        window.alert('Failed to save product. Please try again.');
-        setIsSubmitting(false);
-      }
+      await onSave(payload);
     },
-    [form, newCategory, onSave, isSubmitting]
+    [form, onSave, isSaving, validateForm]
   );
 
   return (
     <Modal
       show={show}
-      onHide={isSubmitting ? undefined : onHide}
-      centered
+      onHide={isSaving ? undefined : onHide}
       size="lg"
+      centered
       scrollable
       contentClassName="rounded-4 shadow-lg"
+      className="product-modal"
     >
-      <Modal.Header closeButton={!isSubmitting} className="border-0 pb-0">
+      <Modal.Header closeButton={!isSaving} className="border-0 pb-0">
         <Modal.Title className="d-flex align-items-center gap-2">
           <i className="bi bi-box text-lavender" aria-hidden="true"></i>
           {product ? 'Edit Product' : 'Add New Product'}
@@ -236,9 +192,8 @@ const ProductModal = memo(function ProductModal({
       >
         <form onSubmit={handleSubmit} noValidate>
           <div className="row g-3">
-            {/* Left column */}
             <div className="col-12 col-md-7">
-              {/* Product name */}
+              {/* Name */}
               <div className="mb-3">
                 <label htmlFor="productName" className="form-label fw-semibold">
                   Name <span className="text-danger">*</span>
@@ -249,71 +204,54 @@ const ProductModal = memo(function ProductModal({
                   name="name"
                   value={form.name}
                   onChange={handleChange}
-                  required
-                  disabled={isSubmitting}
-                  className="form-control form-control-lg rounded-3 shadow-sm"
+                  disabled={isSaving}
+                  className={`form-control form-control-lg rounded-3 shadow-sm ${errors.name ? 'is-invalid' : ''}`}
                   placeholder="Product name"
                 />
+                {errors.name && <div className="invalid-feedback d-block">{errors.name}</div>}
               </div>
 
-              {/* Category selection + new category input */}
+              {/* Category */}
               <div className="mb-3">
                 <label htmlFor="productCategory" className="form-label fw-semibold">
                   Category <span className="text-danger">*</span>
                 </label>
-
-                <div className="d-flex flex-wrap gap-2">
-                  <select
-                    id="productCategory"
-                    name="category"
-                    value={form.category}
-                    onChange={handleChange}
-                    disabled={isSubmitting}
-                    className="form-select form-select-lg rounded-3 shadow-sm flex-grow-1"
-                  >
-                    <option value="">Select Category</option>
-                    {categories.map((category) => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
-                    ))}
-                  </select>
-
-                  <input
-                    type="text"
-                    placeholder="New Category"
-                    value={newCategory}
-                    onChange={(event) => setNewCategory(event.target.value)}
-                    disabled={isSubmitting}
-                    className="form-control form-control-lg rounded-3 shadow-sm"
-                    style={{ width: '180px', minWidth: '140px' }}
-                  />
-                </div>
+                <CreatableSelect
+                  inputId="productCategory"
+                  options={categoryOptions}
+                  value={selectedCategory}
+                  onChange={handleCategoryChange}
+                  onCreateOption={handleCategoryCreate}
+                  placeholder="Select or create category"
+                  isDisabled={isSaving}
+                  isClearable
+                  {...portalSelectProps}
+                  styles={buildSelectStyles(!!errors.category)}
+                />
+                {errors.category && <div className="text-danger small mt-1">{errors.category}</div>}
               </div>
 
-              {/* Price + Discount */}
+              {/* Price & Discount */}
               <div className="row g-2">
                 <div className="col-6">
-                  <label htmlFor="productPrice" className="form-label fw-semibold">
-                    Price (₹)
+                  <label htmlFor="productAmount" className="form-label fw-semibold">
+                    Price (₹) <small className="text-muted">(after discount)</small>
                   </label>
                   <input
-                    id="productPrice"
+                    id="productAmount"
                     type="number"
-                    name="price"
-                    value={form.price}
+                    name="amount"
+                    value={form.amount}
                     onChange={handleChange}
                     step="0.01"
                     min="0"
-                    disabled={isSubmitting}
-                    className="form-control form-control-lg rounded-3 shadow-sm"
+                    disabled={isSaving}
+                    className={`form-control form-control-lg rounded-3 shadow-sm ${errors.amount ? 'is-invalid' : ''}`}
                   />
+                  {errors.amount && <div className="invalid-feedback d-block">{errors.amount}</div>}
                 </div>
-
                 <div className="col-6">
-                  <label htmlFor="productDiscount" className="form-label fw-semibold">
-                    Discount %
-                  </label>
+                  <label htmlFor="productDiscount" className="form-label fw-semibold">Discount %</label>
                   <input
                     id="productDiscount"
                     type="number"
@@ -322,81 +260,72 @@ const ProductModal = memo(function ProductModal({
                     onChange={handleChange}
                     min="0"
                     max="100"
-                    disabled={isSubmitting}
-                    className="form-control form-control-lg rounded-3 shadow-sm"
+                    disabled={isSaving}
+                    className={`form-control form-control-lg rounded-3 shadow-sm ${errors.discount ? 'is-invalid' : ''}`}
                   />
+                  {errors.discount && <div className="invalid-feedback d-block">{errors.discount}</div>}
                 </div>
               </div>
 
               {/* Contents */}
               <div className="mb-3 mt-3">
-                <label htmlFor="productContents" className="form-label fw-semibold">
-                  Contents
-                </label>
+                <label htmlFor="productContents" className="form-label fw-semibold">Contents</label>
                 <input
                   id="productContents"
                   type="text"
                   name="contents"
                   value={form.contents}
                   onChange={handleChange}
-                  disabled={isSubmitting}
+                  disabled={isSaving}
                   className="form-control form-control-lg rounded-3 shadow-sm"
                   placeholder="e.g. 50 pcs, 12 rockets"
                 />
               </div>
             </div>
 
-            {/* Right column */}
             <div className="col-12 col-md-5">
               {/* Status */}
               <div className="mb-3">
-                <label htmlFor="productStatus" className="form-label fw-semibold">
-                  Status
-                </label>
-                <select
-                  id="productStatus"
-                  name="status"
-                  value={form.status}
-                  onChange={handleChange}
-                  disabled={isSubmitting}
-                  className="form-select form-select-lg rounded-3 shadow-sm"
-                >
-                  <option value="in_stock">In Stock</option>
-                  <option value="no_stock">No Stock</option>
-                </select>
+                <label htmlFor="productStatus" className="form-label fw-semibold">Status</label>
+                <Select
+                  inputId="productStatus"
+                  options={STATUS_OPTIONS}
+                  value={selectedStatus}
+                  onChange={handleStatusChange}
+                  isDisabled={isSaving}
+                  isSearchable={false}
+                  {...portalSelectProps}
+                  styles={buildSelectStyles()}
+                />
               </div>
 
-              {/* Image upload */}
+              {/* Image */}
               <div>
-                <label htmlFor="productImage" className="form-label fw-semibold">
-                  Product Image
-                </label>
+                <label htmlFor="productImage" className="form-label fw-semibold">Product Image</label>
                 <input
                   id="productImage"
                   ref={fileInputRef}
                   type="file"
                   accept="image/*"
                   onChange={handleFileChange}
-                  disabled={isSubmitting}
+                  disabled={isSaving}
                   className="form-control form-control-lg rounded-3 shadow-sm"
                 />
-
                 {imagePreview && (
                   <div className="mt-3 text-center">
                     <img
                       src={imagePreview}
-                      alt="Product preview"
+                      alt="Preview"
                       className="img-fluid rounded-3 border shadow-sm"
                       style={{ maxHeight: '220px', objectFit: 'contain' }}
                     />
-
                     <Button
                       type="button"
                       variant="outline-danger"
                       size="sm"
                       className="mt-2 rounded-3"
                       onClick={handleRemoveImage}
-                      disabled={isSubmitting}
+                      disabled={isSaving}
                     >
                       Remove Image
                     </Button>
@@ -406,40 +335,17 @@ const ProductModal = memo(function ProductModal({
             </div>
           </div>
 
-          {/* Footer */}
           <div className="d-flex justify-content-end gap-3 mt-4 pt-3 border-top">
-            <Button
-              type="button"
-              variant="secondary"
-              size="lg"
-              onClick={onHide}
-              disabled={isSubmitting}
-              className="rounded-3 px-4"
-            >
+            <Button type="button" variant="secondary" size="lg" onClick={onHide} disabled={isSaving} className="rounded-3 px-4">
               Cancel
             </Button>
-
-            <Button
-              variant="primary"
-              size="lg"
-              type="submit"
-              disabled={isSubmitting}
-              className="rounded-3 px-4"
-            >
-              {isSubmitting ? (
+            <Button variant="primary" size="lg" type="submit" disabled={isSaving} className="rounded-3 px-4">
+              {isSaving ? (
                 <>
-                  <span
-                    className="spinner-border spinner-border-sm me-2"
-                    role="status"
-                    aria-hidden="true"
-                  ></span>
+                  <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true" />
                   Saving...
                 </>
-              ) : product ? (
-                'Update Product'
-              ) : (
-                'Add Product'
-              )}
+              ) : product ? 'Update Product' : 'Add Product'}
             </Button>
           </div>
         </form>

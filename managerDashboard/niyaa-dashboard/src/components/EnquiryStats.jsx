@@ -1,61 +1,36 @@
-import React, { memo, useMemo } from 'react';
+import React, { memo } from 'react';
 import { Card } from 'react-bootstrap';
 
-/**
- * EnquiryStats
- * ----------------------------------------------------------------------------
- * Displays enquiry counts for:
- * - Today
- * - This Week
- * - This Month
- *
- * Supported prop shapes:
- * 1) { day: number, week: number, month: number }
- * 2) undefined / null / invalid -> safely falls back to 0 values
- */
-const EnquiryStats = memo(function EnquiryStats({ enquiries }) {
-  /**
-   * Normalize enquiry stats into a guaranteed safe object.
-   * This prevents UI crashes if parent passes null, array, or malformed data.
-   */
-  const stats = useMemo(() => {
-    if (!enquiries || typeof enquiries !== 'object' || Array.isArray(enquiries)) {
-      return { day: 0, week: 0, month: 0 };
-    }
+const EnquiryStats = memo(function EnquiryStats({ enquiries = [] }) {
+  // If enquiries is not an array, treat as empty
+  const safe = Array.isArray(enquiries) ? enquiries : [];
 
-    return {
-      day: Number.isFinite(Number(enquiries.day)) ? Number(enquiries.day) : 0,
-      week: Number.isFinite(Number(enquiries.week)) ? Number(enquiries.week) : 0,
-      month: Number.isFinite(Number(enquiries.month)) ? Number(enquiries.month) : 0,
-    };
-  }, [enquiries]);
+  // Calculate totals – assuming each enquiry has day, week, month
+  const totalDay = safe.reduce((sum, e) => sum + (Number(e.day) || 0), 0);
+  const totalWeek = safe.reduce((sum, e) => sum + (Number(e.week) || 0), 0);
+  const totalMonth = safe.reduce((sum, e) => sum + (Number(e.month) || 0), 0);
 
   return (
-    <Card className="h-100 border-0 shadow-sm">
+    <Card className="stat-card stat-card-light h-100">
       <Card.Body>
         <div className="text-muted small fw-medium">Enquiries</div>
-
-        <div className="mt-3 d-flex flex-column gap-2">
-          <div className="d-flex justify-content-between align-items-center">
+        <div className="mt-2">
+          <div className="d-flex justify-content-between">
             <span>Today</span>
-            <span className="fw-bold">{stats.day}</span>
+            <strong>{totalDay}</strong>
           </div>
-
-          <div className="d-flex justify-content-between align-items-center">
+          <div className="d-flex justify-content-between">
             <span>This Week</span>
-            <span className="fw-bold">{stats.week}</span>
+            <strong>{totalWeek}</strong>
           </div>
-
-          <div className="d-flex justify-content-between align-items-center">
+          <div className="d-flex justify-content-between">
             <span>This Month</span>
-            <span className="fw-bold">{stats.month}</span>
+            <strong>{totalMonth}</strong>
           </div>
         </div>
       </Card.Body>
     </Card>
   );
 });
-
-EnquiryStats.displayName = 'EnquiryStats';
 
 export default EnquiryStats;

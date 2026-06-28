@@ -58,9 +58,9 @@ const DashboardHome = memo(function DashboardHome({
       {/* ------------------------------------------------------------------ */}
       {/* Page Header                                                        */}
       {/* ------------------------------------------------------------------ */}
-      <div className="d-flex align-items-center gap-2 mb-4">
+      <div className="d-flex align-items-center gap-2 mb-4 ">
         <i className="bi bi-house-door fs-4 text-primary-custom" aria-hidden="true"></i>
-        <h4 className="mb-0 fw-semibold">Dashboard</h4>
+        <span className="pt-3"><h4 className="mb-0 fw-semibold">Dashboard</h4></span>
       </div>
 
       {/* ------------------------------------------------------------------ */}
@@ -90,15 +90,15 @@ const DashboardHome = memo(function DashboardHome({
           </Col>
         ))}
 
-        <Col xs={12} md={6} lg={3}>
+        {/* <Col xs={12} md={6} lg={3}>
           <EnquiryStats enquiries={safeEnquiries} />
-        </Col>
+        </Col> */}
       </Row>
 
       {/* ------------------------------------------------------------------ */}
       {/* Quick Actions Info Card                                            */}
       {/* ------------------------------------------------------------------ */}
-      <Card className="mt-4 shadow-sm border-0 stat-card">
+      {/* <Card className="mt-4 shadow-sm border-0 stat-card">
         <Card.Body className="d-flex align-items-center gap-3 flex-wrap">
           <i className="bi bi-info-circle fs-4 text-primary-custom" aria-hidden="true"></i>
 
@@ -110,7 +110,7 @@ const DashboardHome = memo(function DashboardHome({
             </p>
           </div>
         </Card.Body>
-      </Card>
+      </Card> */}
     </>
   );
 });

@@ -11,6 +11,8 @@
    - smoother popup animations
    - better product card responsiveness
    - more premium / liquid / glass UI feel
+   - react-select theming + portal sizing (FIXED)
+   - modal not fitting mobile screens (FIXED)
    ============================================================ */
 
 /* ------------------------------------------------------------
@@ -116,11 +118,10 @@ body {
   margin: 0;
   font-family: var(--font-family-base);
   color: var(--text-1);
-  /* background-color: #b6b0e7 !important; */
-   background:
-    radial-gradient(circle at top left, rgba(242, 242, 243, 0.18), transparent 26%),
-    radial-gradient(circle at top right, rgba(242, 242, 245, 0.12), transparent 22%),
-    linear-gradient(180deg, var(--bg-app-2) 0%, var(--bg-app) 100%) !important; 
+  background:
+    radial-gradient(circle at top left, rgba(214, 178, 233, 0.18), transparent 26%),
+    radial-gradient(circle at top right, rgba(253, 4, 253, 0.12), transparent 22%),
+    linear-gradient(180deg, var(--bg-app-2) 0%, var(--bg-app) 100%) !important;
   min-height: 100vh;
   transition: background-color var(--transition-med), color var(--transition-med);
   overflow-x: hidden;
@@ -135,7 +136,6 @@ img {
   display: block;
   object-fit: cover !important;
   object-position: center !important;
-  
 }
 
 button,
@@ -161,7 +161,7 @@ a {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(108, 92, 231, 0.42);
+  background: rgba(174, 12, 238, 0.42);
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
@@ -189,6 +189,8 @@ a {
     border-color var(--transition-fast),
     color var(--transition-fast);
   box-shadow: none;
+  position: relative;
+  z-index: 1;
 }
 .btn:active {
   transform: translateY(1px);
@@ -296,9 +298,9 @@ a {
 
 .navbar.sticky-top {
   backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(px);
   background: var(--bg-surface) !important;
-  box-shadow: 0 8px 30px rgba(16, 10, 36, 0.06);
+  box-shadow: 0 20px 30px rgba(16, 10, 36, 0.06);
 }
 
 [data-bs-theme='dark'] .navbar.sticky-top {
@@ -315,7 +317,6 @@ a {
   margin-left: 0.4rem;
 }
 
-/* toggle icon */
 .navbar-toggler {
   border: 1px solid var(--border) !important;
   border-radius: 14px !important;
@@ -379,7 +380,6 @@ a {
   }
 }
 
-/* headings spacing */
 .main-content > .d-flex:first-child,
 .main-content > .alert:first-child + .d-flex,
 .main-content h4 {
@@ -447,7 +447,6 @@ a {
   }
 }
 
-/* Quick actions card */
 .card.stat-card.mt-4 {
   border-radius: 24px !important;
 }
@@ -525,13 +524,32 @@ a {
 }
 
 /* ------------------------------------------------------------
+   REACT-SELECT (ALL dropdowns, themed via CSS vars) — FIXED
+   ------------------------------------------------------------
+   Most theming is done inline via selectStyles.js so it works
+   with react-select's emotion engine, but these globals act as
+   a safety net and fix the "menu always has a fixed/wrong width"
+   and stacking issues caused by being nested inside the modal's
+   overflow:auto body.
+   ------------------------------------------------------------ */
+.react-select__control {
+  width: 100%;
+}
+
+/* Menus are rendered into document.body via menuPortalTarget,
+   so they always escape the modal's overflow:auto clipping and
+   are sized against the control's own measured width. */
+.react-select__menu-portal {
+  z-index: 99999 !important;
+}
+
+/* ------------------------------------------------------------
    PRODUCT GRID
    ------------------------------------------------------------ */
 .product-grid {
   margin-top: 0.25rem;
 }
 
-/* tighter row spacing */
 .row.g-3 {
   --bs-gutter-x: 0.9rem;
   --bs-gutter-y: 0.9rem;
@@ -571,6 +589,13 @@ a {
     radial-gradient(circle at top right, rgba(168, 146, 255, 0.16), transparent 26%),
     linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
   pointer-events: none;
+  z-index: 0;
+}
+
+.product-card .card-body,
+.product-card .card-footer {
+  position: relative;
+  z-index: 1;
 }
 
 .product-card:hover {
@@ -584,7 +609,6 @@ a {
     linear-gradient(180deg, rgba(33, 27, 51, 0.94) 0%, rgba(25, 20, 39, 0.96) 100%);
 }
 
-/* Product image area */
 .product-card .position-relative {
   height: 176px !important;
   background: linear-gradient(180deg, #f7f2ff 0%, #efe7ff 100%) !important;
@@ -604,7 +628,6 @@ a {
   transform: scale(1.03);
 }
 
-/* Card body spacing tightened */
 .product-card .card-body {
   display: flex;
   flex-direction: column;
@@ -641,7 +664,6 @@ a {
   letter-spacing: 0.1px;
 }
 
-/* Category badge */
 .category-badge {
   display: inline-flex;
   align-items: center;
@@ -657,7 +679,6 @@ a {
   margin-bottom: 0.2rem;
 }
 
-/* Discount badge */
 .discount-badge {
   position: absolute;
   top: 10px;
@@ -672,7 +693,6 @@ a {
   box-shadow: 0 10px 24px rgba(225, 112, 85, 0.24);
 }
 
-/* Footer buttons */
 .product-card .card-footer .btn {
   min-height: 38px;
   border-radius: 14px !important;
@@ -745,6 +765,16 @@ a {
   opacity: 1;
 }
 
+/* Fullscreen-on-mobile dialogs (fullscreen="sm-down" etc.) must
+   NOT get the translateY/scale entrance — Bootstrap handles their
+   own full-viewport sizing and the transform was fighting it on
+   some browsers, contributing to the "doesn't fit" feeling. */
+.modal.fade .modal-dialog.modal-fullscreen-sm-down,
+.modal.fade .modal-dialog.modal-fullscreen-down,
+.modal.fade .modal-dialog.modal-fullscreen {
+  transform: none;
+}
+
 .modal-content {
   border: 1px solid var(--border) !important;
   border-radius: 28px !important;
@@ -783,7 +813,6 @@ a {
     transparent !important;
 }
 
-/* Product modal form controls */
 .modal .form-control,
 .modal .form-select {
   min-height: 48px;
@@ -806,19 +835,16 @@ a {
   --bs-gutter-y: 0.75rem;
 }
 
-/* make image preview area compact */
 .modal img.img-fluid {
   max-height: 180px !important;
   object-fit: contain;
   border-radius: 18px !important;
 }
 
-/* modal footer buttons area created manually in component */
 .modal .border-top {
   border-color: var(--border) !important;
 }
 
-/* prevent modal from feeling too huge on dark mode / mobile */
 @media (min-width: 992px) {
   .modal-lg,
   .modal-xl {
@@ -826,8 +852,22 @@ a {
   }
 }
 
+/* ------------------------------------------------------------
+   MOBILE MODAL FIT — FIXED
+   ------------------------------------------------------------
+   Previously `.modal-dialog { margin: 0.75rem !important; }` and
+   `.modal-content { border-radius: 24px !important; }` were applied
+   unconditionally, even to Bootstrap's `.modal-fullscreen-sm-down`
+   dialog (added automatically by the `fullscreen="sm-down"` prop on
+   <Modal>). That fought Bootstrap's own full-viewport sizing and
+   made the modal look cramped / not fit the screen on mobile.
+
+   Fix: skip margin + radius + filtering for fullscreen dialogs, and
+   let the modal body fill the available height instead of being
+   capped at a fixed vh.
+   ------------------------------------------------------------ */
 @media (max-width: 767.98px) {
-  .modal-dialog {
+  .modal-dialog:not(.modal-fullscreen-sm-down):not(.modal-fullscreen) {
     margin: 0.75rem !important;
   }
 
@@ -839,21 +879,41 @@ a {
     max-height: 74vh;
     padding: 0.95rem !important;
   }
+
+  /* Fullscreen dialog: no rounded corners, no forced margin, and
+     the body should flex to fill remaining height rather than be
+     capped at 74vh (which left dead space / cut off content). */
+  .modal-dialog.modal-fullscreen-sm-down,
+  .modal-dialog.modal-fullscreen {
+    margin: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100% !important;
+    height: 100dvh !important;
+  }
+
+  .modal-fullscreen-sm-down .modal-content,
+  .modal-fullscreen .modal-content {
+    border-radius: 0 !important;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .modal-fullscreen-sm-down .modal-body,
+  .modal-fullscreen .modal-body {
+    max-height: none;
+    flex: 1 1 auto;
+    overflow-y: auto;
+  }
 }
 
 /* ------------------------------------------------------------
    PRODUCT MODAL RESPONSIVE FORM LAYOUT
    ------------------------------------------------------------ */
-/* Your ProductModal currently uses:
-   left: col-6 col-lg-7
-   right: col-6 col-lg-5
-
-   That feels cramped on very small screens. So on narrow mobile
-   we stack the form into single column to prevent overflow / zoom feel.
-*/
 @media (max-width: 575.98px) {
-  .modal .col-6.col-lg-7,
-  .modal .col-6.col-lg-5 {
+  .modal .col-12.col-md-7,
+  .modal .col-12.col-md-5 {
     width: 100% !important;
     flex: 0 0 100% !important;
   }
@@ -924,12 +984,10 @@ a {
   -webkit-backdrop-filter: blur(2px);
 }
 
-/* smooth slide animation */
 .offcanvas.offcanvas-start {
   transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* close icon */
 .btn-close {
   opacity: 0.8;
 }
@@ -1088,12 +1146,10 @@ img[alt='Admin'] {
     padding: 0.75rem;
   }
 
-  /* mobile dashboard spacing */
   .main-content > .d-flex:first-child {
     margin-bottom: 0.85rem !important;
   }
 
-  /* make cards less "zoomed" */
   .product-card {
     border-radius: 20px !important;
   }
@@ -1139,13 +1195,11 @@ img[alt='Admin'] {
     display: none !important;
   }
 
-  /* filters */
   .input-group,
   .form-select {
     min-height: 44px;
   }
 
-  /* dashboard cards stack nicely */
   .stat-card,
   .stat-card-light,
   .card.h-100.border-0.shadow-sm {
@@ -1157,7 +1211,6 @@ img[alt='Admin'] {
     font-size: 1.55rem !important;
   }
 
-  /* pagination */
   .page-item .page-link {
     min-width: 36px;
     min-height: 36px;
@@ -1184,4 +1237,101 @@ img[alt='Admin'] {
   .product-card .fs-5 {
     font-size: 0.86rem !important;
   }
+}
+
+/* ============================================================
+   BACK-TO-TOP BUTTON – 3D Liquid Glass (Yellow/Gold)
+   ============================================================ */
+.back-to-top-3d {
+  position: fixed;
+  bottom: 2.5rem;
+  right: 2.5rem;
+  z-index: 999;
+  width: 60px;
+  height: 60px;
+  border-radius: 50% !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 !important;
+  font-size: 2rem;
+  border: none !important;
+  background: linear-gradient(145deg, #ffd700, #f0c000) !important;
+  color: #1a1a1a !important;
+  box-shadow:
+    0 12px 35px rgba(255, 215, 0, 0.5),
+    0 6px 14px rgba(0, 0, 0, 0.2),
+    inset 0 -6px 8px rgba(0, 0, 0, 0.15),
+    inset 0 6px 8px rgba(255, 255, 255, 0.7);
+  text-shadow: 0 2px 4px rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  transform: perspective(800px) rotateX(0deg) rotateY(0deg) translateZ(0);
+}
+
+/* Hover: 3D pop + black with gold glow */
+.back-to-top-3d:hover {
+  background: linear-gradient(145deg, #ffd700, #f0c000) !important;
+  color: #ffd700 !important;
+  box-shadow:
+    0 16px 45px rgba(255, 215, 0, 0.6),
+    0 8px 20px rgba(0, 0, 0, 0.4),
+    inset 0 -6px 8px rgba(0, 0, 0, 0.3),
+    inset 0 6px 8px rgba(255, 215, 0, 0.2);
+  transform: perspective(800px) rotateX(4deg) rotateY(-4deg) translateZ(15px) scale(1.08);
+  border-color: rgba(255, 215, 0, 0.3) !important;
+}
+
+/* Active: push-down effect */
+.back-to-top-3d:active {
+  transform: perspective(800px) rotateX(0deg) rotateY(0deg) translateZ(-8px) scale(0.92);
+  box-shadow:
+    0 4px 15px rgba(0, 0, 0, 0.2),
+    inset 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Add a subtle inner glow ring */
+.back-to-top-3d::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  right: 4px;
+  bottom: 4px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.2);
+  pointer-events: none;
+}
+
+/* Responsive adjustments */
+@media (max-width: 575.98px) {
+  .back-to-top-3d {
+    width: 50px;
+    height: 50px;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    font-size: 1.6rem;
+  }
+}
+
+/* Dark mode: slightly adjusted */
+[data-bs-theme='dark'] .back-to-top-3d {
+  background: linear-gradient(145deg, #e6b800, #cc9900) !important;
+  box-shadow:
+    0 12px 35px rgba(255, 215, 0, 0.3),
+    0 6px 14px rgba(0, 0, 0, 0.5),
+    inset 0 -6px 8px rgba(0, 0, 0, 0.3),
+    inset 0 6px 8px rgba(255, 255, 255, 0.5);
+}
+
+[data-bs-theme='dark'] .back-to-top-3d:hover {
+  background: linear-gradient(145deg, #e6b800, #cc9900) !important;
+  box-shadow:
+    0 16px 45px rgba(255, 215, 0, 0.4),
+    0 8px 20px rgba(0, 0, 0, 0.6),
+    inset 0 -6px 8px rgba(0, 0, 0, 0.3),
+    inset 0 6px 8px rgba(255, 215, 0, 0.2);
 }

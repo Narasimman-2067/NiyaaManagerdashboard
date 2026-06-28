@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect, memo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Row,
   Col,
@@ -9,60 +9,39 @@ import {
   Badge,
   Card,
 } from 'react-bootstrap';
+import Select from 'react-select';
 import ProductModal from './ProductModal';
+import AlertModal from './AlertModal';
 import ExportImport from './ExportImport';
-import { formatINR } from '../utils/utils';
+import { fetchDashboardData, saveDashboardData } from '../utils/dataService';
+import { formatINR, generateId } from '../utils/utils';
+import { reactSelectStyles, portalSelectProps } from '../utils/selectStyles';
 
-/* -------------------------------------------------------------------------- */
-/* Constants                                                                  */
-/* -------------------------------------------------------------------------- */
+const PAGE_SIZE_OPTIONS = [20, 40, 80, 200, 500];
+const FALLBACK_IMAGE = 'https://via.placeholder.com/400x300/f0edf5/6C5CE7?text=No+Image';
 
-const PAGE_SIZE = 12;
-const FALLBACK_IMAGE =
-  'https://via.placeholder.com/400x300/f0edf5/6C5CE7?text=No+Image';
-
-/* -------------------------------------------------------------------------- */
-/* Helpers                                                                    */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Returns a safe normalized product list so rendering never breaks even if
- * imported / fetched data is slightly malformed.
- */
 function normalizeProducts(products) {
   if (!Array.isArray(products)) return [];
-
-  return products.map((product, index) => {
-    const safeProduct = product && typeof product === 'object' ? product : {};
-
-    return {
-      id: safeProduct.id ?? `product-${index}`,
-      name: safeProduct.name ?? '',
-      category: safeProduct.category ?? '',
-      amount: safeProduct.amount ?? safeProduct.price ?? 0,
-      price: safeProduct.price ?? safeProduct.amount ?? 0,
-      image: safeProduct.image ?? '',
-      contents: safeProduct.contents ?? '',
-      discount_percent: Number(safeProduct.discount_percent) || 0,
-      status: safeProduct.status === 'no_stock' ? 'no_stock' : 'in_stock',
-    };
-  });
+  return products.map((p) => ({
+    rowid: p.rowid || p.id || `local-${Date.now()}-${Math.random()}`,
+    name: p.name ?? '',
+    category: p.category ?? '',
+    amount: p.amount ?? p.price ?? 0,
+    price: p.price ?? p.amount ?? 0,
+    image: p.image ?? '',
+    contents: p.contents ?? '',
+    discount_percent: Number(p.discount_percent) || 0,
+    status: p.status === 'no_stock' ? 'no_stock' : 'in_stock',
+  }));
 }
 
-/**
- * Safe text formatter for search/filter matching.
- */
 function normalizeText(value) {
   return String(value ?? '').trim().toLowerCase();
 }
 
-/* -------------------------------------------------------------------------- */
-/* Component                                                                  */
-/* -------------------------------------------------------------------------- */
-
-const ProductsManager = memo(function ProductsManager({
-  products = [],
-  categories = [],
+export default function ProductsManager({
+  products: externalProducts,
+  categories: externalCategories,
   onAdd,
   onUpdate,
   onDelete,
@@ -70,157 +49,293 @@ const ProductsManager = memo(function ProductsManager({
   onExport,
   onImport,
 }) {
+  // ---------- State ----------
+  const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [showModal, setShowModal] = useState(false);
+  const [pageSize, setPageSize] = useState(20);
+  const [showBackToTop, setShowBackToTop] = useState(false);
+const [deleting, setDeleting] = useState(false);
+  const [showProductModal, setShowProductModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
 
-  /**
-   * Normalize incoming props to keep rendering stable.
-   */
-  const safeProducts = useMemo(() => normalizeProducts(products), [products]);
-  const safeCategories = useMemo(
-    () => (Array.isArray(categories) ? categories.filter(Boolean) : []),
-    [categories]
-  );
+  const [alert, setAlert] = useState({
+    show: false,
+    title: '',
+    message: '',
+    variant: 'info',
+    confirmText: 'OK',
+    onConfirm: null,
+    showCancel: false,
+    cancelText: 'Cancel',
+    onCancel: null,
+  });
 
-  /**
-   * Filter products by search query + selected category.
-   */
-  const filtered = useMemo(() => {
-    const query = normalizeText(search);
+  // Refs for touch swipe
+  const gridContainerRef = useRef(null);
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
+  const isSwiping = useRef(false);
 
-    return safeProducts.filter((product) => {
-      const matchesSearch =
-        !query ||
-        normalizeText(product.name).includes(query) ||
-        normalizeText(product.category).includes(query);
-
-      const matchesCategory =
-        !filterCategory || product.category === filterCategory;
-
-      return matchesSearch && matchesCategory;
-    });
-  }, [safeProducts, search, filterCategory]);
-
-  /**
-   * Total number of pages based on current filtered result.
-   */
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-
-  /**
-   * If filters/search reduce the result set and the current page becomes invalid,
-   * automatically move back to the last valid page.
-   */
+  // ---------- Use external products if provided, else load own ----------
   useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
+    if (externalProducts && externalProducts.length > 0) {
+      setProducts(externalProducts);
+      setCategories(externalCategories || []);
+      setLoading(false);
+    } else {
+      loadData();
     }
-  }, [currentPage, totalPages]);
+  }, [externalProducts, externalCategories]);
 
-  /**
-   * Paginated slice for the current page.
-   */
-  const paginated = useMemo(() => {
-    const start = (currentPage - 1) * PAGE_SIZE;
-    return filtered.slice(start, start + PAGE_SIZE);
-  }, [filtered, currentPage]);
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await fetchDashboardData();
+      const normalized = normalizeProducts(result.products);
+      setProducts(normalized);
+      const uniqueCategories = [...new Set(normalized.map(p => p.category).filter(Boolean))];
+      setCategories(uniqueCategories);
+      setError(null);
+    } catch (err) {
+      console.error('Failed to load products:', err);
+      setError('Failed to load products. Please refresh.');
+      showAlert('Error', 'Failed to load products. Please refresh.', 'danger');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  /* ---------------------------------------------------------------------- */
-  /* Modal Handlers                                                         */
-  /* ---------------------------------------------------------------------- */
+  // ---------- Save ----------
+ const saveProducts = useCallback(async (newProducts, successMessage = 'Changes saved successfully') => {
+  setIsSaving(true);
+  try {
+    await saveDashboardData({ products: newProducts });
+    setIsSaving(false);
+    showAlert('Success', successMessage, 'success');   // ✅ shows success, stays until OK
+    return true;
+  } catch (err) {
+    console.error('Save failed:', err);
+    setIsSaving(false);
+    setError('Failed to save changes. Check console.');
+    showAlert('Error', 'Failed to save changes. Please try again.', 'danger');
+    return false;
+  }
+}, []);
 
+  // ---------- CRUD ----------
+  const handleAdd = useCallback(async (productData) => {
+    const newProduct = {
+      ...productData,
+      rowid: generateId(),
+      last_updated: new Date().toISOString(),
+    };
+    const updated = [...products, newProduct];
+    setProducts(updated);
+    setCategories([...new Set(updated.map(p => p.category).filter(Boolean))]);
+    await saveProducts(updated, 'Product added successfully');
+    if (typeof onAdd === 'function') onAdd(newProduct);
+  }, [products, saveProducts, onAdd]);
+
+  const handleUpdate = useCallback(async (rowid, updates) => {
+    const updated = products.map((p) =>
+      p.rowid === rowid
+        ? { ...p, ...updates, rowid: p.rowid, last_updated: new Date().toISOString() }
+        : p
+    );
+    setProducts(updated);
+    setCategories([...new Set(updated.map(p => p.category).filter(Boolean))]);
+    await saveProducts(updated, 'Product updated successfully');
+    if (typeof onUpdate === 'function') onUpdate(rowid, updates);
+  }, [products, saveProducts, onUpdate]);
+
+ 
+
+const handleDelete = useCallback(async (rowid) => {
+  setAlert({
+    show: true,
+    title: 'Confirm Delete',
+    message: 'Are you sure you want to delete this product?',
+    variant: 'danger',
+    confirmText: 'Delete',
+    showCancel: true,
+    cancelText: 'Cancel',
+    onConfirm: async () => {
+      // Close confirm and set loading
+      setAlert(prev => ({ ...prev, show: false }));
+      setDeleting(true);
+
+      try {
+        const updated = products.filter((p) => p.rowid !== rowid);
+        setProducts(updated);
+        setCategories([...new Set(updated.map(p => p.category).filter(Boolean))]);
+        await saveProducts(updated, 'Product deleted successfully');
+        if (typeof onDelete === 'function') onDelete(rowid);
+      } catch (error) {
+        console.error('Delete error:', error);
+        showAlert('Error', 'Failed to delete product.', 'danger');
+      } finally {
+        setDeleting(false);
+      }
+    },
+    onCancel: () => setAlert(prev => ({ ...prev, show: false })),
+  });
+}, [products, saveProducts, onDelete]);
+  const handleToggleStatus = useCallback(async (rowid) => {
+    const updated = products.map((p) =>
+      p.rowid === rowid
+        ? { ...p, status: p.status === 'in_stock' ? 'no_stock' : 'in_stock', last_updated: new Date().toISOString() }
+        : p
+    );
+    setProducts(updated);
+    await saveProducts(updated, 'Status toggled');
+    if (typeof onToggleStatus === 'function') onToggleStatus(rowid);
+  }, [products, saveProducts, onToggleStatus]);
+
+  // ---------- Modal controls ----------
   const openAddModal = useCallback(() => {
     setEditingProduct(null);
-    setShowModal(true);
+    setShowProductModal(true);
   }, []);
 
   const openEditModal = useCallback((product) => {
     setEditingProduct(product);
-    setShowModal(true);
+    setShowProductModal(true);
   }, []);
 
-  const closeModal = useCallback(() => {
-    setShowModal(false);
+  const closeProductModal = useCallback(() => {
+    setShowProductModal(false);
     setEditingProduct(null);
   }, []);
 
-  /**
-   * Save handler used by ProductModal.
-   * Supports async parent handlers.
-   */
-  const handleSave = useCallback(
-    async (productData) => {
-      if (editingProduct) {
-        if (typeof onUpdate === 'function') {
-          await onUpdate(editingProduct.id, productData);
-        }
-      } else if (typeof onAdd === 'function') {
-        await onAdd(productData);
-      }
+  // ---------- Alert helper ----------
+  const showAlert = (title, message, variant = 'info', confirmText = 'OK') => {
+    setAlert({
+      show: true,
+      title,
+      message,
+      variant,
+      confirmText,
+      showCancel: false,
+      onConfirm: () => setAlert(prev => ({ ...prev, show: false })),
+    });
+  };
 
-      closeModal();
-    },
-    [editingProduct, onAdd, onUpdate, closeModal]
-  );
+  // ---------- Filter & Pagination ----------
+  const filtered = useMemo(() => {
+    const query = normalizeText(search);
+    return products.filter((p) => {
+      const matchesSearch = !query || normalizeText(p.name).includes(query) || normalizeText(p.category).includes(query);
+      const matchesCategory = !filterCategory || p.category === filterCategory;
+      return matchesSearch && matchesCategory;
+    });
+  }, [products, search, filterCategory]);
 
-  /* ---------------------------------------------------------------------- */
-  /* Product Action Handlers                                                */
-  /* ---------------------------------------------------------------------- */
-
-  const handleDelete = useCallback(
-    (productId) => {
-      if (typeof onDelete === 'function') {
-        onDelete(productId);
-      }
-    },
-    [onDelete]
-  );
-
-  const handleToggleStatus = useCallback(
-    (productId) => {
-      if (typeof onToggleStatus === 'function') {
-        onToggleStatus(productId);
-      }
-    },
-    [onToggleStatus]
-  );
-
-  /* ---------------------------------------------------------------------- */
-  /* Pagination UI                                                          */
-  /* ---------------------------------------------------------------------- */
-
-  const visiblePages = useMemo(() => {
-    const maxVisible = 7;
-    let start = Math.max(1, currentPage - 3);
-    let end = Math.min(totalPages, start + maxVisible - 1);
-
-    if (end - start < maxVisible - 1) {
-      start = Math.max(1, end - maxVisible + 1);
-    }
-
-    const pages = [];
-    for (let page = start; page <= end; page += 1) {
-      pages.push(page);
-    }
-    return pages;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
   }, [currentPage, totalPages]);
+
+  const paginated = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, currentPage, pageSize]);
+
+  // ---------- Touch swipe (page change, no animation) ----------
+  useEffect(() => {
+    const container = gridContainerRef.current;
+    if (!container) return;
+
+    const handleTouchStart = (e) => {
+      touchStartX.current = e.changedTouches[0].screenX;
+      touchStartY.current = e.changedTouches[0].screenY;
+      isSwiping.current = false;
+    };
+
+    const handleTouchMove = (e) => {
+      const deltaX = e.changedTouches[0].screenX - touchStartX.current;
+      const deltaY = e.changedTouches[0].screenY - touchStartY.current;
+      if (Math.abs(deltaX) > 20 && Math.abs(deltaX) > Math.abs(deltaY)) {
+        e.preventDefault();
+        isSwiping.current = true;
+      }
+    };
+
+    const handleTouchEnd = (e) => {
+      if (!isSwiping.current) return;
+      const deltaX = e.changedTouches[0].screenX - touchStartX.current;
+      if (Math.abs(deltaX) < 50) return;
+
+      if (deltaX < 0 && currentPage < totalPages) {
+        setCurrentPage(p => p + 1);
+      } else if (deltaX > 0 && currentPage > 1) {
+        setCurrentPage(p => p - 1);
+      }
+    };
+
+    container.addEventListener('touchstart', handleTouchStart, { passive: true });
+    container.addEventListener('touchmove', handleTouchMove, { passive: false });
+    container.addEventListener('touchend', handleTouchEnd, { passive: true });
+
+    return () => {
+      container.removeEventListener('touchstart', handleTouchStart);
+      container.removeEventListener('touchmove', handleTouchMove);
+      container.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [currentPage, totalPages]);
+
+  // ---------- Back to top ----------
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowBackToTop(window.scrollY > 400);
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // ---------- Category filter options ----------
+  const categoryOptions = useMemo(() => categories.map(c => ({ label: c, value: c })), [categories]);
+  const selectedFilterCategory = categoryOptions.find(opt => opt.value === filterCategory) || null;
+
+  // ---------- Render ----------
+  if (loading && products.length === 0) {
+    return (
+      <div className="d-flex justify-content-center align-items-center" style={{ minHeight: '60vh' }}>
+        <div className="spinner-border text-primary" role="status">
+          <span className="visually-hidden">Loading...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
-      {/* ------------------------------------------------------------------ */}
-      {/* Header                                                             */}
-      {/* ------------------------------------------------------------------ */}
+      {/* Error Alert */}
+      {error && (
+        <div className="alert alert-danger rounded-3 mb-3" role="alert">
+          <i className="bi bi-exclamation-triangle me-2"></i>
+          {error}
+        </div>
+      )}
+
+      {/* Toolbar */}
       <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
         <div className="d-flex align-items-center gap-2">
           <i className="bi bi-box fs-4 text-lavender" aria-hidden="true"></i>
-          <h4 className="mb-0 fw-semibold">Products</h4>
+          <span className="pt-3"><h4 className="mb-0 fw-semibold">Products</h4></span>
+          <span className="badge bg-secondary ms-2">{filtered.length} total</span>
         </div>
-
         <div className="d-flex gap-2 flex-wrap">
           <ExportImport onExport={onExport} onImport={onImport} />
-
           <Button variant="primary" size="sm" onClick={openAddModal}>
             <i className="bi bi-plus-lg me-1" aria-hidden="true"></i>
             Add Product
@@ -228,202 +343,220 @@ const ProductsManager = memo(function ProductsManager({
         </div>
       </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Filters                                                            */}
-      {/* ------------------------------------------------------------------ */}
-      <Row className="g-2 mb-4">
-       <Col xs={12} md={6} lg={5}>
-  <InputGroup>
-    <InputGroup.Text>
-      <i className="bi bi-search"></i>
-    </InputGroup.Text>
-
-    <Form.Control
-      type="search"
-      placeholder="Search products..."
-      value={search}
-      onChange={(e) => {
-        setSearch(e.target.value);
-        setCurrentPage(1);
-      }}
-    />
-
-    {search && (
-      <Button
-        variant="link"
-        className="border-0 text-muted px-3"
-        onClick={() => {
-          setSearch('');
-          setCurrentPage(1);
-        }}
-        aria-label="Clear search"
-        style={{ textDecoration: 'none' }}
-      >
-        <i className="bi bi-x-circle-fill"></i>
-      </Button>
-    )}
-  </InputGroup>
-</Col>
-
+      {/* Filters */}
+      <Row className="g-2 mb-4 align-items-center">
         <Col xs={12} md={6} lg={4}>
-          <Form.Select
-            value={filterCategory}
-            onChange={(event) => {
-              setFilterCategory(event.target.value);
-              setCurrentPage(1);
-            }}
-          >
-            <option value="">All Categories</option>
-            {safeCategories.map((category) => (
-              <option key={category} value={category}>
-                {category}
-              </option>
-            ))}
-          </Form.Select>
+          <InputGroup>
+            <InputGroup.Text><i className="bi bi-search"></i></InputGroup.Text>
+            <Form.Control
+              type="search"
+              placeholder="Search products..."
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
+           isClearable
+           />
+            {/* {search && (
+              <Button
+                variant="link"
+                className="border-0 text-muted px-3"
+                onClick={() => { setSearch(''); setCurrentPage(1); }}
+                aria-label="Clear search"
+                style={{ textDecoration: 'none' }}
+              >
+                <i className="bi bi-x-circle-fill"></i>
+              </Button>
+            )} */}
+          </InputGroup>
         </Col>
-
-        <Col xs={12} lg={3} className="text-lg-end d-flex align-items-center">
-          <small className="text-muted">{filtered.length} products</small>
+        <Col xs={12} md={4} lg={3}>
+          <Select
+            options={categoryOptions}
+            value={selectedFilterCategory}
+            onChange={(selected) => { setFilterCategory(selected?.value || ''); setCurrentPage(1); }}
+            placeholder="All Categories"
+            isClearable
+            {...portalSelectProps}
+            styles={reactSelectStyles}
+          />
         </Col>
+        
       </Row>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Product Grid                                                       */}
-      {/* ------------------------------------------------------------------ */}
-      {paginated.length > 0 ? (
-        <Row className="g-3">
-          {paginated.map((product) => {
-            const displayPrice =
-              Number(product.amount) > 0
-                ? Number(product.amount)
-                : Number(product.price) || 0;
-
-            return (
-              <Col xs={6} sm={6} md={4} lg={3} key={product.id}>
-                <Card className="h-100 product-card shadow-sm border-0 overflow-hidden">
-                  <div
-                    className="position-relative"
-                    style={{ height: '190px', background: '#f0edf5' }}
-                  >
-                    <Card.Img
-                      variant="top"
-                      src={product.image || FALLBACK_IMAGE}
-                      alt={product.name || 'Product image'}
-                      style={{ height: '100%', width: '100%', objectFit: 'cover' }}
-                      onError={(event) => {
-                        event.target.onerror = null;
-                        event.target.src = FALLBACK_IMAGE;
-                      }}
-                      loading="lazy"
-                    />
-
-                    {product.discount_percent > 0 && (
-                      <Badge
-                        className="discount-badge"
-                        style={{ position: 'absolute', top: '8px', right: '8px' }}
-                      >
-                        {product.discount_percent}% OFF
-                      </Badge>
-                    )}
-                  </div>
-
-                  <Card.Body className="d-flex flex-column">
-                    <Card.Title
-                      className="fs-6 fw-bold text-truncate mb-1"
-                      title={product.name}
-                    >
-                      {product.name || 'Untitled Product'}
-                    </Card.Title>
-
-                    <span className="category-badge">
-                      {product.category || 'Others'}
-                    </span>
-
-                    <div className="mt-auto pt-2">
-                      <div className="d-flex justify-content-between align-items-end gap-2">
-                        <strong className="fs-5">
-                          ₹{formatINR(displayPrice)}
-                        </strong>
-
-                        <Badge
-                          bg={product.status === 'in_stock' ? 'success' : 'danger'}
-                          pill
-                        >
-                          {product.status === 'in_stock' ? 'In Stock' : 'No Stock'}
-                        </Badge>
-                      </div>
-                    </div>
-                  </Card.Body>
-
-                  <Card.Footer className="bg-transparent border-0 pt-0 pb-3">
-                    <div className="d-flex gap-2">
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        className="flex-fill"
-                        onClick={() => openEditModal(product)}
-                        title="Edit product"
-                      >
-                        <i className="bi bi-pencil-square" aria-hidden="true"></i>
-                      </Button>
-
-                      <Button
-                        variant={product.status === 'in_stock' ? 'success' : 'danger'}
-                        size="sm"
-                        className="flex-fill stock-toggle"
-                        onClick={() => handleToggleStatus(product.id)}
-                        title="Toggle stock status"
-                      >
-                        <i
-                          className={`bi ${
-                            product.status === 'in_stock'
-                              ? 'bi-check-circle-fill'
-                              : 'bi-x-circle-fill'
-                          }`}
-                          aria-hidden="true"
-                        ></i>
-                        <span className="ms-1 small d-none d-sm-inline">
-                          {product.status === 'in_stock' ? 'In' : 'Out'}
-                        </span>
-                      </Button>
-
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        className="flex-fill"
-                        onClick={() => handleDelete(product.id)}
-                        title="Delete product"
-                      >
-                        <i className="bi bi-trash" aria-hidden="true"></i>
-                      </Button>
-                    </div>
-                  </Card.Footer>
-                </Card>
-              </Col>
-            );
-          })}
-        </Row>
-      ) : (
-        <div className="text-center py-5 text-muted">
-          <i className="bi bi-inbox fs-1 mb-3" aria-hidden="true"></i>
-          <p className="mb-3">No products found</p>
-          <Button variant="primary" onClick={openAddModal}>
-            Add First Product
-          </Button>
-        </div>
-      )}
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Pagination                                                         */}
-      {/* ------------------------------------------------------------------ */}
-      {totalPages > 1 && paginated.length > 0 && (
-        <Pagination className="justify-content-center mt-4">
-          <Pagination.Prev
+      {/* Product Grid with arrow navigation */}
+      <div className="product-grid-wrapper">
+        {/* Left Arrow */}
+        {/* {totalPages > 1 && (
+          <button
+            className="grid-arrow grid-arrow-left"
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
             disabled={currentPage === 1}
-            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-          />
+            aria-label="Previous page"
+          >
+            <i className="bi bi-chevron-left"></i>
+          </button>
+        )} */}
 
-          {visiblePages.map((page) => (
+        <div ref={gridContainerRef} className="product-grid-container">
+          <div className="product-grid">
+            {paginated.length > 0 ? (
+              <Row className="g-3">
+                {paginated.map((product) => {
+                  const displayPrice = Number(product.amount) > 0 ? Number(product.amount) : Number(product.price) || 0;
+                  return (
+                    <Col xs={6} sm={6} md={4} lg={3} key={product.rowid}>
+                      <Card className="h-100 product-card shadow-sm border-0 overflow-hidden">
+                        <div className="position-relative" style={{ height: '190px', background: '#f0edf5' }}>
+                          <Card.Img
+                            variant="top"
+                            src={product.image || FALLBACK_IMAGE}
+                            alt={product.name || 'Product'}
+                            style={{ height: '100%', width: '100%', objectFit: 'cover' }}
+                            onError={(e) => { e.target.onerror = null; e.target.src = FALLBACK_IMAGE; }}
+                            loading="lazy"
+                          />
+                          {product.discount_percent > 0 && (
+                            <Badge className="discount-badge" style={{ position: 'absolute', top: '8px', right: '8px' }}>
+                              {product.discount_percent}% OFF
+                            </Badge>
+                          )}
+                        </div>
+                        <Card.Body className="d-flex flex-column">
+                          <Card.Title className="fs-6 fw-bold text-truncate mb-1" title={product.name}>
+                            {product.name || 'Untitled'}
+                          </Card.Title>
+                          <span className="category-badge">{product.category || 'Others'}</span>
+                          <div className="mt-auto pt-2">
+                            <div className="d-flex justify-content-between align-items-end gap-2">
+                              <strong className="fs-5">₹{formatINR(displayPrice)}</strong>
+                              <Badge bg={product.status === 'in_stock' ? 'success' : 'danger'} pill>
+                                {product.status === 'in_stock' ? 'In Stock' : 'No Stock'}
+                              </Badge>
+                            </div>
+                          </div>
+                        </Card.Body>
+                        <Card.Footer className="bg-transparent border-0 pt-0 pb-3">
+                          <div className="d-flex gap-2">
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              className="flex-fill"
+                              onClick={() => openEditModal(product)}
+                              title="Edit"
+                            >
+                              <i className="bi bi-pencil-square" aria-hidden="true"></i>
+                            </Button>
+                            <Button
+                              variant={product.status === 'in_stock' ? 'success' : 'danger'}
+                              size="sm"
+                              className="flex-fill stock-toggle"
+                              onClick={() => handleToggleStatus(product.rowid)}
+                              title="Toggle stock"
+                            >
+                              <i className={`bi ${product.status === 'in_stock' ? 'bi-check-circle-fill' : 'bi-x-circle-fill'}`} aria-hidden="true"></i>
+                              <span className="ms-1 small d-none d-sm-inline">
+                                {product.status === 'in_stock' ? 'In' : 'Out'}
+                              </span>
+                            </Button>
+                           <Button
+                            variant="danger"
+                            size="sm"
+                            className="flex-fill"
+                            onClick={() => handleDelete(product.rowid)}
+                            disabled={deleting}
+                            title="Delete"
+                          >
+                            <i className="bi bi-trash" aria-hidden="true"></i>
+                          </Button>
+                          </div>
+                        </Card.Footer>
+                      </Card>
+                    </Col>
+                  );
+                })}
+              </Row>
+            ) : (
+              <div className="text-center py-5 text-muted">
+                <i className="bi bi-inbox fs-1 mb-3" aria-hidden="true"></i>
+                <p className="mb-3">No products found</p>
+                <Button variant="primary" onClick={openAddModal}>Add First Product</Button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right Arrow */}
+        {/* {totalPages > 1 && (
+          <button
+            className="grid-arrow grid-arrow-right"
+            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+            aria-label="Next page"
+          >
+            <i className="bi bi-chevron-right"></i>
+          </button>
+        )} */}
+      </div>
+      <Row>
+  <Col xs={12} md={4} lg={2} className="d-flex align-items-center gap-2">
+    <span className="text-muted small">Show</span>
+    <Form.Select
+      size="sm"
+      value={pageSize}
+      onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+      className="entries-select"
+      style={{ width: '90px', flexShrink: 0 }}
+    >
+      {PAGE_SIZE_OPTIONS.map(size => (
+        <option key={size} value={size}>{size}</option>
+      ))}
+    </Form.Select>
+  </Col>
+
+  <Col xs={12} md={4} lg={3} className="text-lg-end text-md-center text-start">
+    <small className="text-muted">
+      Page {currentPage} of {totalPages}
+    </small>
+  </Col>
+</Row>
+      {/* Pagination */}
+      {totalPages > 1 && paginated.length > 0 && (
+  <div className="d-flex flex-wrap justify-content-center align-items-center gap-3 mt-4">
+    <span className="text-muted small">
+      Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filtered.length)} of {filtered.length}
+    </span>
+    <Pagination className="mb-0 justify-content-center">
+      <Pagination.Prev
+        disabled={currentPage === 1}
+        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+      />
+
+      {(() => {
+        const pages = [];
+        const maxVisible = 7;
+        let start = Math.max(1, currentPage - 3);
+        let end = Math.min(totalPages, currentPage + 3);
+
+        if (end - start < maxVisible - 1) {
+          if (currentPage < totalPages / 2) {
+            end = Math.min(totalPages, start + maxVisible - 1);
+          } else {
+            start = Math.max(1, end - maxVisible + 1);
+          }
+        }
+
+        if (start > 1) {
+          pages.push(
+            <Pagination.Item key={1} onClick={() => setCurrentPage(1)}>
+              1
+            </Pagination.Item>
+          );
+          if (start > 2) {
+            pages.push(<Pagination.Ellipsis key="ellipsis-start" />);
+          }
+        }
+
+        for (let page = start; page <= end; page++) {
+          pages.push(
             <Pagination.Item
               key={page}
               active={page === currentPage}
@@ -431,29 +564,66 @@ const ProductsManager = memo(function ProductsManager({
             >
               {page}
             </Pagination.Item>
-          ))}
+          );
+        }
 
-          <Pagination.Next
-            disabled={currentPage === totalPages}
-            onClick={() =>
-              setCurrentPage((prev) => Math.min(totalPages, prev + 1))
-            }
-          />
-        </Pagination>
-      )}
+        if (end < totalPages) {
+          if (end < totalPages - 1) {
+            pages.push(<Pagination.Ellipsis key="ellipsis-end" />);
+          }
+          pages.push(
+            <Pagination.Item key={totalPages} onClick={() => setCurrentPage(totalPages)}>
+              {totalPages}
+            </Pagination.Item>
+          );
+        }
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Add / Edit Product Modal                                           */}
-      {/* ------------------------------------------------------------------ */}
+        return pages;
+      })()}
+
+      <Pagination.Next
+        disabled={currentPage === totalPages}
+        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+      />
+    </Pagination>
+  </div>
+)}
+
+      {/* Back to Top Button */}
+      {showBackToTop && (
+  <Button
+    variant="warning"
+    className="back-to-top-3d"
+    onClick={scrollToTop}
+    aria-label="Back to top"
+  >
+    <i className="bi bi-arrow-up"></i>
+  </Button>
+)}
+
+      {/* Product Modal */}
       <ProductModal
-        show={showModal}
-        onHide={closeModal}
-        onSave={handleSave}
+        show={showProductModal}
+        onHide={closeProductModal}
+        onSave={editingProduct ? handleUpdate : handleAdd}
         product={editingProduct}
-        categories={safeCategories}
+        categories={categories}
+        isSaving={isSaving}
+      />
+
+      {/* Alert Modal */}
+      <AlertModal
+        show={alert.show}
+        onHide={() => setAlert(prev => ({ ...prev, show: false }))}
+        title={alert.title}
+        message={alert.message}
+        variant={alert.variant}
+        confirmText={alert.confirmText}
+        onConfirm={alert.onConfirm}
+        showCancel={alert.showCancel}
+        cancelText={alert.cancelText}
+        onCancel={alert.onCancel}
       />
     </>
   );
-});
-
-export default ProductsManager;
+}
