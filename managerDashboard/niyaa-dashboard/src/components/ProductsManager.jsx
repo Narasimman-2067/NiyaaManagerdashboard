@@ -364,7 +364,7 @@ export default function ProductManager() {
       <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
         <div className="d-flex align-items-center gap-2">
           <i className="bi bi-box fs-4 text-lavender" aria-hidden="true"></i>
-          <h4 className="mb-0 fw-semibold">Products</h4>
+          <span className="pt-3"><h4 className="mb-0 fw-semibold">Products</h4></span>
           <span className="badge bg-secondary ms-2">{filtered.length} total</span>
           {isSaving && <span className="badge bg-primary ms-2">Saving...</span>}
         </div>
@@ -434,9 +434,7 @@ export default function ProductManager() {
                             style={{
                               height: '100%',
                               width: '100%',
-                              objectFit: 'cover',
-                              imageRendering:'smooth !important',        // helps with scaling
-                              filter: 'contrast(1.35) saturate(1.05)', // slight sharpening boost
+                              objectFit: 'cover',// slight sharpening boost
                               transition: 'transform 0.3s ease',
                             }}
                             onError={(e) => {
