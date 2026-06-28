@@ -153,58 +153,65 @@ function AppContent() {
     debouncedSave(products, enquiries);
   }, [products, enquiries, debouncedSave]);
 
-  // ---------- CRUD handlers ----------
+  // ---------- CRUD handlers (using rowid as primary key) ----------
   const handleAdd = useCallback((product) => {
+    // product already has rowid from ProductsManager
     const newProduct = {
       ...product,
-      id: product?.id || generateId(),
+      id: product?.id || product?.rowid || generateId(),
+      rowid: product?.rowid || generateId(),
       last_updated: new Date().toISOString(),
     };
     setProducts((prev) => [...prev, newProduct]);
   }, []);
 
-  const handleUpdate = useCallback((id, updates) => {
+  const handleUpdate = useCallback((rowid, updates) => {
     setProducts((prev) =>
       prev.map((item) => {
-        if (item.id !== id) return item;
+        // Match by rowid (or fallback to id for compatibility)
+        const itemId = item.rowid || item.id;
+        if (itemId !== rowid) return item;
         return {
           ...item,
           ...updates,
-          id: item.id,
+          rowid: item.rowid || item.id,  // preserve rowid
+          id: item.id || item.rowid,     // preserve id
           last_updated: new Date().toISOString(),
         };
       })
     );
   }, []);
 
-  // const handleDelete = useCallback((id) => {
-  //   // Use custom confirm
-  //   showAlert(
-  //     'Confirm Delete',
-  //     'Are you sure you want to delete this product?',
-  //     'danger',
-  //     'Delete',
-  //     () => {
-  //       setProducts((prev) => prev.filter((item) => item.id !== id));
-  //       setAlert(prev => ({ ...prev, show: false }));
-  //     },
-  //     true,
-  //     'Cancel',
-  //     () => setAlert(prev => ({ ...prev, show: false }))
-  //   );
-  // }, []);
+  const handleDelete = useCallback((rowid) => {
+    showAlert(
+      'Confirm Delete',
+      'Are you sure you want to delete this product?',
+      'danger',
+      'Delete',
+      () => {
+        setProducts((prev) => prev.filter((item) => {
+          const itemId = item.rowid || item.id;
+          return itemId !== rowid;
+        }));
+        setAlert(prev => ({ ...prev, show: false }));
+      },
+      true,
+      'Cancel',
+      () => setAlert(prev => ({ ...prev, show: false }))
+    );
+  }, []);
 
-  const handleToggleStatus = useCallback((id) => {
+  const handleToggleStatus = useCallback((rowid) => {
     setProducts((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              status: item.status === 'in_stock' ? 'no_stock' : 'in_stock',
-              last_updated: new Date().toISOString(),
-            }
-          : item
-      )
+      prev.map((item) => {
+        const itemId = item.rowid || item.id;
+        if (itemId !== rowid) return item;
+        return {
+          ...item,
+          status: item.status === 'in_stock' ? 'no_stock' : 'in_stock',
+          last_updated: new Date().toISOString(),
+        };
+      })
     );
   }, []);
 
@@ -245,7 +252,6 @@ function AppContent() {
 
   // ---------- Import (with validation & replace) ----------
   const handleImport = useCallback((file) => {
-    // Validate file type
     if (!file) {
       showAlert('Error', 'No file selected.', 'danger');
       return;
@@ -269,16 +275,13 @@ function AppContent() {
           return;
         }
 
-        // Show confirm dialog
         showAlert(
           'Confirm Import',
           `This will replace ALL existing products with ${importedProducts.length} products from the file. Continue?`,
           'warning',
           'Replace',
           async () => {
-            // Close alert
             setAlert(prev => ({ ...prev, show: false }));
-            // Replace data
             setIsSaving(true);
             try {
               const result = await replaceDashboardData({
@@ -332,7 +335,7 @@ function AppContent() {
         enquiries={enquiries}
         onAdd={handleAdd}
         onUpdate={handleUpdate}
-      //  onDelete={handleDelete}
+        onDelete={handleDelete}
         onToggleStatus={handleToggleStatus}
         error={error}
         onReset={handleReset}

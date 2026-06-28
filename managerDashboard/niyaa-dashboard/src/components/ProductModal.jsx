@@ -70,12 +70,11 @@ const ProductModal = memo(function ProductModal({
     return unique.map((cat) => ({ label: cat, value: cat }));
   }, [categories]);
 
-  // ----- FIX: ensure new category is displayed even if not in options -----
+  // Ensure new category is displayed even if not in options
   const selectedCategory = useMemo(() => {
     if (!form.category) return null;
     const found = categoryOptions.find((opt) => opt.value === form.category);
     if (found) return found;
-    // If not found, create a temporary option to display the new category
     return { label: form.category, value: form.category };
   }, [categoryOptions, form.category]);
 
@@ -93,7 +92,6 @@ const ProductModal = memo(function ProductModal({
   }, []);
 
   const handleCategoryCreate = useCallback((inputValue) => {
-    // Set the new category immediately
     setForm((prev) => ({ ...prev, category: inputValue }));
     setErrors((prev) => ({ ...prev, category: '' }));
   }, []);

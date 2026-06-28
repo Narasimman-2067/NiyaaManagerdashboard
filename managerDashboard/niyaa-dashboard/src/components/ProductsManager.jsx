@@ -39,16 +39,7 @@ function normalizeText(value) {
   return String(value ?? '').trim().toLowerCase();
 }
 
-export default function ProductsManager({
-  products: externalProducts,
-  categories: externalCategories,
-  onAdd,
-  onUpdate,
-  onDelete,
-  onToggleStatus,
-  onExport,
-  onImport,
-}) {
+export default function ProductManager() {
   // ---------- State ----------
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -60,7 +51,8 @@ export default function ProductsManager({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [showBackToTop, setShowBackToTop] = useState(false);
-const [deleting, setDeleting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
   const [showProductModal, setShowProductModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
 
@@ -81,18 +73,9 @@ const [deleting, setDeleting] = useState(false);
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
   const isSwiping = useRef(false);
+  const deleteProcessingRef = useRef(false);
 
-  // ---------- Use external products if provided, else load own ----------
-  useEffect(() => {
-    if (externalProducts && externalProducts.length > 0) {
-      setProducts(externalProducts);
-      setCategories(externalCategories || []);
-      setLoading(false);
-    } else {
-      loadData();
-    }
-  }, [externalProducts, externalCategories]);
-
+  // ---------- Load Data ----------
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
@@ -105,33 +88,37 @@ const [deleting, setDeleting] = useState(false);
     } catch (err) {
       console.error('Failed to load products:', err);
       setError('Failed to load products. Please refresh.');
-      showAlert('Error', 'Failed to load products. Please refresh.', 'danger');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // ---------- Save ----------
- const saveProducts = useCallback(async (newProducts, successMessage = 'Changes saved successfully') => {
-  setIsSaving(true);
-  try {
-    await saveDashboardData({ products: newProducts });
-    setIsSaving(false);
-    showAlert('Success', successMessage, 'success');   // ✅ shows success, stays until OK
-    return true;
-  } catch (err) {
-    console.error('Save failed:', err);
-    setIsSaving(false);
-    setError('Failed to save changes. Check console.');
-    showAlert('Error', 'Failed to save changes. Please try again.', 'danger');
-    return false;
-  }
-}, []);
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
-  // ---------- CRUD ----------
-  const handleAdd = useCallback(async (productData) => {
+  // ---------- Save to Firebase ----------
+  const saveProducts = useCallback(async (newProducts, successMessage = 'Changes saved successfully') => {
+    setIsSaving(true);
+    try {
+      await saveDashboardData({ products: newProducts });
+      setIsSaving(false);
+      showAlert('Success', successMessage, 'success');
+      return true;
+    } catch (err) {
+      console.error('Save failed:', err);
+      setIsSaving(false);
+      setError('Failed to save changes. Check console.');
+      showAlert('Error', 'Failed to save changes. Please try again.', 'danger');
+      return false;
+    }
+  }, []);
+
+  // ---------- CRUD Handlers ----------
+  // handleAdd: payload is the product data (no rowid)
+  const handleAdd = useCallback(async (payload) => {
     const newProduct = {
-      ...productData,
+      ...payload,
       rowid: generateId(),
       last_updated: new Date().toISOString(),
     };
@@ -139,10 +126,11 @@ const [deleting, setDeleting] = useState(false);
     setProducts(updated);
     setCategories([...new Set(updated.map(p => p.category).filter(Boolean))]);
     await saveProducts(updated, 'Product added successfully');
-    if (typeof onAdd === 'function') onAdd(newProduct);
-  }, [products, saveProducts, onAdd]);
+  }, [products, saveProducts]);
 
-  const handleUpdate = useCallback(async (rowid, updates) => {
+  // handleUpdate: payload includes rowid and other fields
+  const handleUpdate = useCallback(async (payload) => {
+    const { rowid, ...updates } = payload;
     const updated = products.map((p) =>
       p.rowid === rowid
         ? { ...p, ...updates, rowid: p.rowid, last_updated: new Date().toISOString() }
@@ -151,41 +139,46 @@ const [deleting, setDeleting] = useState(false);
     setProducts(updated);
     setCategories([...new Set(updated.map(p => p.category).filter(Boolean))]);
     await saveProducts(updated, 'Product updated successfully');
-    if (typeof onUpdate === 'function') onUpdate(rowid, updates);
-  }, [products, saveProducts, onUpdate]);
+  }, [products, saveProducts]);
 
- 
+  const handleDelete = useCallback(
+    (rowid) => {
+      if (deleteProcessingRef.current) return;
+      deleteProcessingRef.current = true;
 
-const handleDelete = useCallback(async (rowid) => {
-  setAlert({
-    show: true,
-    title: 'Confirm Delete',
-    message: 'Are you sure you want to delete this product?',
-    variant: 'danger',
-    confirmText: 'Delete',
-    showCancel: true,
-    cancelText: 'Cancel',
-    onConfirm: async () => {
-      // Close confirm and set loading
-      setAlert(prev => ({ ...prev, show: false }));
-      setDeleting(true);
-
-      try {
-        const updated = products.filter((p) => p.rowid !== rowid);
-        setProducts(updated);
-        setCategories([...new Set(updated.map(p => p.category).filter(Boolean))]);
-        await saveProducts(updated, 'Product deleted successfully');
-        if (typeof onDelete === 'function') onDelete(rowid);
-      } catch (error) {
-        console.error('Delete error:', error);
-        showAlert('Error', 'Failed to delete product.', 'danger');
-      } finally {
-        setDeleting(false);
-      }
+      setAlert({
+        show: true,
+        title: 'Confirm Delete',
+        message: 'Are you sure you want to delete this product?',
+        variant: 'danger',
+        confirmText: 'Delete',
+        showCancel: true,
+        cancelText: 'Cancel',
+        onConfirm: async () => {
+          setAlert((prev) => ({ ...prev, show: false }));
+          setDeleting(true);
+          try {
+            const updated = products.filter((p) => p.rowid !== rowid);
+            setProducts(updated);
+            setCategories([...new Set(updated.map(p => p.category).filter(Boolean))]);
+            await saveProducts(updated, 'Product deleted successfully');
+          } catch (error) {
+            console.error('Delete error:', error);
+            showAlert('Error', 'Failed to delete product.', 'danger');
+          } finally {
+            setDeleting(false);
+            deleteProcessingRef.current = false;
+          }
+        },
+        onCancel: () => {
+          setAlert((prev) => ({ ...prev, show: false }));
+          deleteProcessingRef.current = false;
+        },
+      });
     },
-    onCancel: () => setAlert(prev => ({ ...prev, show: false })),
-  });
-}, [products, saveProducts, onDelete]);
+    [products, saveProducts]
+  );
+
   const handleToggleStatus = useCallback(async (rowid) => {
     const updated = products.map((p) =>
       p.rowid === rowid
@@ -194,8 +187,7 @@ const handleDelete = useCallback(async (rowid) => {
     );
     setProducts(updated);
     await saveProducts(updated, 'Status toggled');
-    if (typeof onToggleStatus === 'function') onToggleStatus(rowid);
-  }, [products, saveProducts, onToggleStatus]);
+  }, [products, saveProducts]);
 
   // ---------- Modal controls ----------
   const openAddModal = useCallback(() => {
@@ -222,7 +214,7 @@ const handleDelete = useCallback(async (rowid) => {
       variant,
       confirmText,
       showCancel: false,
-      onConfirm: () => setAlert(prev => ({ ...prev, show: false })),
+      onConfirm: () => setAlert((prev) => ({ ...prev, show: false })),
     });
   };
 
@@ -246,7 +238,7 @@ const handleDelete = useCallback(async (rowid) => {
     return filtered.slice(start, start + pageSize);
   }, [filtered, currentPage, pageSize]);
 
-  // ---------- Touch swipe (page change, no animation) ----------
+  // ---------- Touch swipe ----------
   useEffect(() => {
     const container = gridContainerRef.current;
     if (!container) return;
@@ -272,9 +264,9 @@ const handleDelete = useCallback(async (rowid) => {
       if (Math.abs(deltaX) < 50) return;
 
       if (deltaX < 0 && currentPage < totalPages) {
-        setCurrentPage(p => p + 1);
+        setCurrentPage((p) => p + 1);
       } else if (deltaX > 0 && currentPage > 1) {
-        setCurrentPage(p => p - 1);
+        setCurrentPage((p) => p - 1);
       }
     };
 
@@ -291,25 +283,68 @@ const handleDelete = useCallback(async (rowid) => {
 
   // ---------- Back to top ----------
   useEffect(() => {
-    const handleScroll = () => {
-      setShowBackToTop(window.scrollY > 400);
-    };
+    const handleScroll = () => setShowBackToTop(window.scrollY > 400);
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const scrollToTop = () => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  const scrollToTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
 
   // ---------- Category filter options ----------
   const categoryOptions = useMemo(() => categories.map(c => ({ label: c, value: c })), [categories]);
   const selectedFilterCategory = categoryOptions.find(opt => opt.value === filterCategory) || null;
 
+  // ---------- Export/Import ----------
+  const handleExport = useCallback(() => {
+    const payload = { products, exportedAt: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `products_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [products]);
+
+  const handleImport = useCallback(async (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const parsed = JSON.parse(e.target.result);
+        const importedProducts = parsed?.products;
+        if (!Array.isArray(importedProducts) || importedProducts.length === 0) {
+          showAlert('Error', 'No products found in the file.', 'danger');
+          return;
+        }
+        setAlert({
+          show: true,
+          title: 'Confirm Import',
+          message: `This will replace ALL existing products with ${importedProducts.length} products from the file. Continue?`,
+          variant: 'warning',
+          confirmText: 'Import',
+          showCancel: true,
+          cancelText: 'Cancel',
+          onConfirm: async () => {
+            setAlert((prev) => ({ ...prev, show: false }));
+            const normalized = normalizeProducts(importedProducts);
+            setProducts(normalized);
+            setCategories([...new Set(normalized.map(p => p.category).filter(Boolean))]);
+            await saveProducts(normalized, 'Import successful!');
+          },
+          onCancel: () => setAlert((prev) => ({ ...prev, show: false })),
+        });
+      } catch (err) {
+        showAlert('Error', 'Invalid JSON file.', 'danger');
+      }
+    };
+    reader.readAsText(file);
+  }, [saveProducts]);
+
   // ---------- Render ----------
   if (loading && products.length === 0) {
     return (
-      <div className="d-flex justify-content-center align-items-center" style={{ minHeight: '60vh' }}>
+      <div className="d-flex justify-content-center align-items-center vh-100">
         <div className="spinner-border text-primary" role="status">
           <span className="visually-hidden">Loading...</span>
         </div>
@@ -319,11 +354,9 @@ const handleDelete = useCallback(async (rowid) => {
 
   return (
     <>
-      {/* Error Alert */}
       {error && (
         <div className="alert alert-danger rounded-3 mb-3" role="alert">
-          <i className="bi bi-exclamation-triangle me-2"></i>
-          {error}
+          <i className="bi bi-exclamation-triangle me-2"></i> {error}
         </div>
       )}
 
@@ -331,14 +364,14 @@ const handleDelete = useCallback(async (rowid) => {
       <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
         <div className="d-flex align-items-center gap-2">
           <i className="bi bi-box fs-4 text-lavender" aria-hidden="true"></i>
-          <span className="pt-3"><h4 className="mb-0 fw-semibold">Products</h4></span>
+          <h4 className="mb-0 fw-semibold">Products</h4>
           <span className="badge bg-secondary ms-2">{filtered.length} total</span>
+          {isSaving && <span className="badge bg-primary ms-2">Saving...</span>}
         </div>
         <div className="d-flex gap-2 flex-wrap">
-          <ExportImport onExport={onExport} onImport={onImport} />
+          <ExportImport onExport={handleExport} onImport={handleImport} />
           <Button variant="primary" size="sm" onClick={openAddModal}>
-            <i className="bi bi-plus-lg me-1" aria-hidden="true"></i>
-            Add Product
+            <i className="bi bi-plus-lg me-1" aria-hidden="true"></i> Add Product
           </Button>
         </div>
       </div>
@@ -353,9 +386,8 @@ const handleDelete = useCallback(async (rowid) => {
               placeholder="Search products..."
               value={search}
               onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
-           isClearable
-           />
-            {/* {search && (
+            />
+            {search && (
               <Button
                 variant="link"
                 className="border-0 text-muted px-3"
@@ -365,7 +397,7 @@ const handleDelete = useCallback(async (rowid) => {
               >
                 <i className="bi bi-x-circle-fill"></i>
               </Button>
-            )} */}
+            )}
           </InputGroup>
         </Col>
         <Col xs={12} md={4} lg={3}>
@@ -379,23 +411,27 @@ const handleDelete = useCallback(async (rowid) => {
             styles={reactSelectStyles}
           />
         </Col>
-        
+        <Col xs={12} md={4} lg={3} className="d-flex align-items-center gap-2">
+          <span className="text-muted small">Show</span>
+          <Form.Select
+            size="sm"
+            value={pageSize}
+            onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+            className="entries-select"
+            style={{ width: '90px', flexShrink: 0 }}
+          >
+            {PAGE_SIZE_OPTIONS.map(size => (
+              <option key={size} value={size}>{size}</option>
+            ))}
+          </Form.Select>
+        </Col>
+        <Col xs={12} md={12} lg={2} className="text-lg-end text-md-center text-start">
+          <small className="text-muted">Page {currentPage} of {totalPages}</small>
+        </Col>
       </Row>
 
-      {/* Product Grid with arrow navigation */}
+      {/* Product Grid */}
       <div className="product-grid-wrapper">
-        {/* Left Arrow */}
-        {/* {totalPages > 1 && (
-          <button
-            className="grid-arrow grid-arrow-left"
-            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-            disabled={currentPage === 1}
-            aria-label="Previous page"
-          >
-            <i className="bi bi-chevron-left"></i>
-          </button>
-        )} */}
-
         <div ref={gridContainerRef} className="product-grid-container">
           <div className="product-grid">
             {paginated.length > 0 ? (
@@ -457,16 +493,16 @@ const handleDelete = useCallback(async (rowid) => {
                                 {product.status === 'in_stock' ? 'In' : 'Out'}
                               </span>
                             </Button>
-                           <Button
-                            variant="danger"
-                            size="sm"
-                            className="flex-fill"
-                            onClick={() => handleDelete(product.rowid)}
-                            disabled={deleting}
-                            title="Delete"
-                          >
-                            <i className="bi bi-trash" aria-hidden="true"></i>
-                          </Button>
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              className="flex-fill"
+                              onClick={() => handleDelete(product.rowid)}
+                              disabled={deleting}
+                              title="Delete"
+                            >
+                              <i className="bi bi-trash" aria-hidden="true"></i>
+                            </Button>
                           </div>
                         </Card.Footer>
                       </Card>
@@ -483,123 +519,71 @@ const handleDelete = useCallback(async (rowid) => {
             )}
           </div>
         </div>
-
-        {/* Right Arrow */}
-        {/* {totalPages > 1 && (
-          <button
-            className="grid-arrow grid-arrow-right"
-            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-            disabled={currentPage === totalPages}
-            aria-label="Next page"
-          >
-            <i className="bi bi-chevron-right"></i>
-          </button>
-        )} */}
       </div>
-      <Row>
-  <Col xs={12} md={4} lg={2} className="d-flex align-items-center gap-2">
-    <span className="text-muted small">Show</span>
-    <Form.Select
-      size="sm"
-      value={pageSize}
-      onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
-      className="entries-select"
-      style={{ width: '90px', flexShrink: 0 }}
-    >
-      {PAGE_SIZE_OPTIONS.map(size => (
-        <option key={size} value={size}>{size}</option>
-      ))}
-    </Form.Select>
-  </Col>
 
-  <Col xs={12} md={4} lg={3} className="text-lg-end text-md-center text-start">
-    <small className="text-muted">
-      Page {currentPage} of {totalPages}
-    </small>
-  </Col>
-</Row>
       {/* Pagination */}
       {totalPages > 1 && paginated.length > 0 && (
-  <div className="d-flex flex-wrap justify-content-center align-items-center gap-3 mt-4">
-    <span className="text-muted small">
-      Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filtered.length)} of {filtered.length}
-    </span>
-    <Pagination className="mb-0 justify-content-center">
-      <Pagination.Prev
-        disabled={currentPage === 1}
-        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-      />
+        <div className="d-flex flex-wrap justify-content-center align-items-center gap-3 mt-4">
+          <span className="text-muted small">
+            Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filtered.length)} of {filtered.length}
+          </span>
+          <Pagination className="mb-0 justify-content-center">
+            <Pagination.Prev
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            />
+            {(() => {
+              const pages = [];
+              const maxVisible = 7;
+              let start = Math.max(1, currentPage - 3);
+              let end = Math.min(totalPages, currentPage + 3);
+              if (end - start < maxVisible - 1) {
+                if (currentPage < totalPages / 2) {
+                  end = Math.min(totalPages, start + maxVisible - 1);
+                } else {
+                  start = Math.max(1, end - maxVisible + 1);
+                }
+              }
+              if (start > 1) {
+                pages.push(<Pagination.Item key={1} onClick={() => setCurrentPage(1)}>1</Pagination.Item>);
+                if (start > 2) pages.push(<Pagination.Ellipsis key="ellipsis-start" />);
+              }
+              for (let page = start; page <= end; page++) {
+                pages.push(
+                  <Pagination.Item key={page} active={page === currentPage} onClick={() => setCurrentPage(page)}>
+                    {page}
+                  </Pagination.Item>
+                );
+              }
+              if (end < totalPages) {
+                if (end < totalPages - 1) pages.push(<Pagination.Ellipsis key="ellipsis-end" />);
+                pages.push(
+                  <Pagination.Item key={totalPages} onClick={() => setCurrentPage(totalPages)}>
+                    {totalPages}
+                  </Pagination.Item>
+                );
+              }
+              return pages;
+            })()}
+            <Pagination.Next
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            />
+          </Pagination>
+        </div>
+      )}
 
-      {(() => {
-        const pages = [];
-        const maxVisible = 7;
-        let start = Math.max(1, currentPage - 3);
-        let end = Math.min(totalPages, currentPage + 3);
-
-        if (end - start < maxVisible - 1) {
-          if (currentPage < totalPages / 2) {
-            end = Math.min(totalPages, start + maxVisible - 1);
-          } else {
-            start = Math.max(1, end - maxVisible + 1);
-          }
-        }
-
-        if (start > 1) {
-          pages.push(
-            <Pagination.Item key={1} onClick={() => setCurrentPage(1)}>
-              1
-            </Pagination.Item>
-          );
-          if (start > 2) {
-            pages.push(<Pagination.Ellipsis key="ellipsis-start" />);
-          }
-        }
-
-        for (let page = start; page <= end; page++) {
-          pages.push(
-            <Pagination.Item
-              key={page}
-              active={page === currentPage}
-              onClick={() => setCurrentPage(page)}
-            >
-              {page}
-            </Pagination.Item>
-          );
-        }
-
-        if (end < totalPages) {
-          if (end < totalPages - 1) {
-            pages.push(<Pagination.Ellipsis key="ellipsis-end" />);
-          }
-          pages.push(
-            <Pagination.Item key={totalPages} onClick={() => setCurrentPage(totalPages)}>
-              {totalPages}
-            </Pagination.Item>
-          );
-        }
-
-        return pages;
-      })()}
-
-      <Pagination.Next
-        disabled={currentPage === totalPages}
-        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-      />
-    </Pagination>
-  </div>
-)}
-
-      {/* Back to Top Button */}
+      {/* Back to Top */}
       {showBackToTop && (
-  <Button
-    variant="warning"
-    className="back-to-top-3d"
-    onClick={scrollToTop}
-    aria-label="Back to top"
-  >
-    <i className="bi bi-arrow-up"></i>
-  </Button>
-)}
+        <Button
+          variant="warning"
+          className="back-to-top-3d"
+          onClick={scrollToTop}
+          aria-label="Back to top"
+        >
+          <i className="bi bi-arrow-up"></i>
+        </Button>
+      )}
 
       {/* Product Modal */}
       <ProductModal
@@ -614,7 +598,7 @@ const handleDelete = useCallback(async (rowid) => {
       {/* Alert Modal */}
       <AlertModal
         show={alert.show}
-        onHide={() => setAlert(prev => ({ ...prev, show: false }))}
+        onHide={() => setAlert((prev) => ({ ...prev, show: false }))}
         title={alert.title}
         message={alert.message}
         variant={alert.variant}
