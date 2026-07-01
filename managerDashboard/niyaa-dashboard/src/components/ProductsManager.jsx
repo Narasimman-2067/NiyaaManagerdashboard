@@ -4,10 +4,11 @@ import {
   Col,
   Form,
   Button,
-  Pagination,
+  //Pagination,
   InputGroup,
   Badge,
   Card,
+  Modal,
 } from 'react-bootstrap';
 import Select from 'react-select';
 import ProductModal from './ProductModal';
@@ -17,7 +18,7 @@ import { fetchDashboardData, saveDashboardData } from '../utils/dataService';
 import { formatINR, generateId } from '../utils/utils';
 import { reactSelectStyles, portalSelectProps } from '../utils/selectStyles';
 
-const PAGE_SIZE_OPTIONS = [20, 40, 80, 200, 500];
+//const PAGE_SIZE_OPTIONS = [20, 40, 80, 200, 500];
 const FALLBACK_IMAGE = 'https://via.placeholder.com/400x300/f0edf5/6C5CE7?text=No+Image';
 
 function normalizeProducts(products) {
@@ -49,10 +50,11 @@ export default function ProductManager() {
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  // const [pageSize, setPageSize] = useState(5000);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [deleting, setDeleting] = useState(false);
-
+const [showImageModal, setShowImageModal] = useState(false);
+const [selectedImage, setSelectedImage] = useState("");
   const [showProductModal, setShowProductModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
 
@@ -115,7 +117,6 @@ export default function ProductManager() {
   }, []);
 
   // ---------- CRUD Handlers ----------
-  // handleAdd: payload is the product data (no rowid)
   const handleAdd = useCallback(async (payload) => {
     const newProduct = {
       ...payload,
@@ -128,7 +129,6 @@ export default function ProductManager() {
     await saveProducts(updated, 'Product added successfully');
   }, [products, saveProducts]);
 
-  // handleUpdate: payload includes rowid and other fields
   const handleUpdate = useCallback(async (payload) => {
     const { rowid, ...updates } = payload;
     const updated = products.map((p) =>
@@ -228,58 +228,58 @@ export default function ProductManager() {
     });
   }, [products, search, filterCategory]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  useEffect(() => {
-    if (currentPage > totalPages) setCurrentPage(totalPages);
-  }, [currentPage, totalPages]);
+  // const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  // useEffect(() => {
+  //   if (currentPage > totalPages) setCurrentPage(totalPages);
+  // }, [currentPage, totalPages]);
 
-  const paginated = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filtered.slice(start, start + pageSize);
-  }, [filtered, currentPage, pageSize]);
+  // const paginated = useMemo(() => {
+  //   const start = (currentPage - 1) * pageSize;
+  //   return filtered.slice(start, start + pageSize);
+  // }, [filtered, currentPage, pageSize]);
 
   // ---------- Touch swipe ----------
-  useEffect(() => {
-    const container = gridContainerRef.current;
-    if (!container) return;
+  // useEffect(() => {
+  //   const container = gridContainerRef.current;
+  //   if (!container) return;
 
-    const handleTouchStart = (e) => {
-      touchStartX.current = e.changedTouches[0].screenX;
-      touchStartY.current = e.changedTouches[0].screenY;
-      isSwiping.current = false;
-    };
+  //   const handleTouchStart = (e) => {
+  //     touchStartX.current = e.changedTouches[0].screenX;
+  //     touchStartY.current = e.changedTouches[0].screenY;
+  //     isSwiping.current = false;
+  //   };
 
-    const handleTouchMove = (e) => {
-      const deltaX = e.changedTouches[0].screenX - touchStartX.current;
-      const deltaY = e.changedTouches[0].screenY - touchStartY.current;
-      if (Math.abs(deltaX) > 20 && Math.abs(deltaX) > Math.abs(deltaY)) {
-        e.preventDefault();
-        isSwiping.current = true;
-      }
-    };
+  //   const handleTouchMove = (e) => {
+  //     const deltaX = e.changedTouches[0].screenX - touchStartX.current;
+  //     const deltaY = e.changedTouches[0].screenY - touchStartY.current;
+  //     if (Math.abs(deltaX) > 20 && Math.abs(deltaX) > Math.abs(deltaY)) {
+  //       e.preventDefault();
+  //       isSwiping.current = true;
+  //     }
+  //   };
 
-    const handleTouchEnd = (e) => {
-      if (!isSwiping.current) return;
-      const deltaX = e.changedTouches[0].screenX - touchStartX.current;
-      if (Math.abs(deltaX) < 50) return;
+  //   // const handleTouchEnd = (e) => {
+  //   //   if (!isSwiping.current) return;
+  //   //   const deltaX = e.changedTouches[0].screenX - touchStartX.current;
+  //   //   if (Math.abs(deltaX) < 50) return;
 
-      if (deltaX < 0 && currentPage < totalPages) {
-        setCurrentPage((p) => p + 1);
-      } else if (deltaX > 0 && currentPage > 1) {
-        setCurrentPage((p) => p - 1);
-      }
-    };
+  //   //   if (deltaX < 0 && currentPage < totalPages) {
+  //   //     setCurrentPage((p) => p + 1);
+  //   //   } else if (deltaX > 0 && currentPage > 1) {
+  //   //     setCurrentPage((p) => p - 1);
+  //   //   }
+  //   // };
 
-    container.addEventListener('touchstart', handleTouchStart, { passive: true });
-    container.addEventListener('touchmove', handleTouchMove, { passive: false });
-    container.addEventListener('touchend', handleTouchEnd, { passive: true });
+  //   container.addEventListener('touchstart', handleTouchStart, { passive: true });
+  //   container.addEventListener('touchmove', handleTouchMove, { passive: false });
+  //   container.addEventListener('touchend', handleTouchEnd, { passive: true });
 
-    return () => {
-      container.removeEventListener('touchstart', handleTouchStart);
-      container.removeEventListener('touchmove', handleTouchMove);
-      container.removeEventListener('touchend', handleTouchEnd);
-    };
-  }, [currentPage, totalPages]);
+  //   return () => {
+  //     container.removeEventListener('touchstart', handleTouchStart);
+  //     container.removeEventListener('touchmove', handleTouchMove);
+  //     container.removeEventListener('touchend', handleTouchEnd);
+  //   };
+  // }, [currentPage, totalPages]);
 
   // ---------- Back to top ----------
   useEffect(() => {
@@ -369,7 +369,7 @@ export default function ProductManager() {
           {isSaving && <span className="badge bg-primary ms-2">Saving...</span>}
         </div>
         <div className="d-flex gap-2 flex-wrap">
-          <ExportImport onExport={handleExport} onImport={handleImport} />
+          {/* <ExportImport onExport={handleExport} onImport={handleImport} /> */}
           <Button variant="primary" size="sm" onClick={openAddModal}>
             <i className="bi bi-plus-lg me-1" aria-hidden="true"></i> Add Product
           </Button>
@@ -378,7 +378,7 @@ export default function ProductManager() {
 
       {/* Filters */}
       <Row className="g-2 mb-4 align-items-center">
-        <Col xs={12} md={6} lg={4}>
+        <Col xs={11} md={6} lg={4} className="mx-auto">
           <InputGroup>
             <InputGroup.Text><i className="bi bi-search"></i></InputGroup.Text>
             <Form.Control
@@ -386,22 +386,10 @@ export default function ProductManager() {
               placeholder="Search products..."
               value={search}
               onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
-
             />
-            {/* {search && (
-              <Button
-                variant="link"
-                className="border-0 text-muted px-3"
-                onClick={() => { setSearch(''); setCurrentPage(1); }}
-                aria-label="Clear search"
-                style={{ textDecoration: 'none' }}
-              >
-                <i className="bi bi-x-circle-fill"></i>
-              </Button>
-            )} */}
           </InputGroup>
         </Col>
-        <Col xs={12} md={4} lg={3}>
+        <Col xs={11} md={5} lg={6} className="mx-auto">
           <Select
             options={categoryOptions}
             value={selectedFilterCategory}
@@ -412,93 +400,136 @@ export default function ProductManager() {
             styles={reactSelectStyles}
           />
         </Col>
-
       </Row>
 
       {/* Product Grid */}
       <div className="product-grid-wrapper">
         <div ref={gridContainerRef} className="product-grid-container">
           <div className="product-grid">
-            {paginated.length > 0 ? (
+            {filtered.length > 0 ? (
               <Row className="g-3">
-                {paginated.map((product) => {
+                {filtered.map((product) => {
                   const displayPrice = Number(product.amount) > 0 ? Number(product.amount) : Number(product.price) || 0;
                   return (
-                    <Col xs={6} sm={6} md={4} lg={3} key={product.rowid}>
-                      <Card className="h-100 product-card shadow-sm border-0 overflow-hidden">
-                        <div className="position-relative" style={{ height: '190px', background: '#f0edf5' }}>
-                          <Card.Img
-                            variant="top"
-                            src={product.image || FALLBACK_IMAGE}
-                            alt={product.name || 'Product'}
-                            style={{
-                              height: '100%',
-                              width: '100%',
-                              objectFit: 'cover',// slight sharpening boost
-                              transition: 'transform 0.3s ease',
-                            }}
-                            onError={(e) => {
-                              e.target.onerror = null;
-                              e.target.src = FALLBACK_IMAGE;
-                            }}
-                            loading="lazy"                          // load faster, but eager for critical images
-                          />
-
-                          {product.discount_percent > 0 && (
-                            <Badge className="discount-badge" style={{ position: 'absolute', top: '8px', right: '8px' }}>
-                              {product.discount_percent}% OFF
-                            </Badge>
-                          )}
-                        </div>
-                        <Card.Body className="d-flex flex-column">
-                          <Card.Title className="fs-6 fw-bold text-truncate mb-1" title={product.name}>
-                            {product.name || 'Untitled'}
-                          </Card.Title>
-                          <span className="category-badge">{product.category || 'Others'}</span>
-                          <div className="mt-auto pt-2">
-                            <div className="d-flex justify-content-between align-items-end gap-2">
-                              <strong className="fs-5">₹{formatINR(displayPrice)}</strong>
-                              <Badge bg={product.status === 'in_stock' ? 'success' : 'danger'} pill>
-                                {product.status === 'in_stock' ? 'In Stock' : 'No Stock'}
+                    <Col xs={11} sm={6} md={4} lg={6} key={product.rowid} className="mx-auto"> 
+                      <Card className="h-60 product-card shadow-sm border-0 overflow-hidden">
+                        <div className="d-flex flex-row ">
+                          {/* LEFT: Image */}
+                          <div
+                            className="position-relative flex-shrink-0"
+                            style={{ width: '140px', minHeight: '200px', background: '#f0edf5' }}
+                          >
+                            {/* <Card.Img
+                              variant="top"
+                              src={product.image || FALLBACK_IMAGE}
+                              alt={product.name || 'Product'}
+                              style={{
+                                height: '100%',
+                                width: '100%',
+                                objectFit: 'cover',
+                                transition: 'transform 0.3s ease',
+                              }}
+                              onError={(e) => {
+                                e.target.onerror = null;
+                                e.target.src = FALLBACK_IMAGE;
+                              }}
+                              loading="lazy"
+                            /> */}
+                            <Card.Img
+                              variant="top"
+                              src={product.image || FALLBACK_IMAGE}
+                              alt={product.name || "Product"}
+                              style={{
+                                height: "100%",
+                                width: "100%",
+                                objectFit: "cover",
+                                cursor: "pointer",
+                                transition: "transform 0.3s ease",
+                              }}
+                              onClick={() => {
+                                setSelectedImage(product.image || FALLBACK_IMAGE);
+                                setShowImageModal(true);
+                              }}
+                              onError={(e) => {
+                                e.target.onerror = null;
+                                e.target.src = FALLBACK_IMAGE;
+                              }}
+                              loading="lazy"
+                            />
+                            {product.discount_percent > 0 && (
+                              <Badge
+                                className="discount-badge"
+                                style={{ position: 'absolute', top: '6px', right: '6px', fontSize: '0.65rem' }}
+                              >
+                                {product.discount_percent}% OFF
                               </Badge>
+                            )}
+                          </div>
+
+                          {/* RIGHT: Content + Buttons */}
+                          <Card.Body className="d-flex flex-column flex-grow-1 p-2">
+                            <Card.Title
+                              className="fs-6 fw-bold text-truncate "
+                              title={product.name}
+                            >
+                              {product.name || 'Untitled'}
+                            </Card.Title>
+                            <span className="category-badge small">
+                              {product.category || 'Others'}
+                            </span>
+                            <span className="d-flex small  gap-2 content-text">
+                            {product.contents ? `${product.contents}` : ''}
+                               <span className="text-decoration-line-through fw-bold text-muted">
+                              {product.price ? `₹${formatINR(product.price)}` : ''}
+                            </span>
+                            </span>
+                            <div className="mt-auto pt-2">
+                              <div className="d-flex justify-content-between align-items-center gap-2">
+                                <strong className="fs-5">₹{formatINR(displayPrice)}</strong>
+                                <Badge
+                                  bg={product.status === 'in_stock' ? 'success' : 'danger'}
+                                  pill
+                                >
+                                  {product.status === 'in_stock' ? 'In Stock' : 'No Stock'}
+                                </Badge>
+                              </div>
                             </div>
-                          </div>
-                        </Card.Body>
-                        <Card.Footer className="bg-transparent border-0 pt-0 pb-3">
-                          <div className="d-flex gap-2">
-                            <Button
-                              variant="primary"
-                              size="sm"
-                              className="flex-fill"
-                              onClick={() => openEditModal(product)}
-                              title="Edit"
-                            >
-                              <i className="bi bi-pencil-square" aria-hidden="true"></i>
-                            </Button>
-                            <Button
-                              variant={product.status === 'in_stock' ? 'success' : 'danger'}
-                              size="sm"
-                              className="flex-fill stock-toggle"
-                              onClick={() => handleToggleStatus(product.rowid)}
-                              title="Toggle stock"
-                            >
-                              <i className={`bi ${product.status === 'in_stock' ? 'bi-check-circle-fill' : 'bi-x-circle-fill'}`} aria-hidden="true"></i>
-                              <span className="ms-1 small d-none d-sm-inline">
-                                {product.status === 'in_stock' ? 'In' : 'Out'}
-                              </span>
-                            </Button>
-                            <Button
-                              variant="danger"
-                              size="sm"
-                              className="flex-fill"
-                              onClick={() => handleDelete(product.rowid)}
-                              disabled={deleting}
-                              title="Delete"
-                            >
-                              <i className="bi bi-trash" aria-hidden="true"></i>
-                            </Button>
-                          </div>
-                        </Card.Footer>
+                            {/* Action Buttons */}
+                            <div className="d-flex gap-2 mt-3">
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                className="flex-fill"
+                                onClick={() => openEditModal(product)}
+                                title="Edit"
+                              >
+                                <i className="bi bi-pencil-square" aria-hidden="true"></i>
+                              </Button>
+                              <Button
+                                variant={product.status === 'in_stock' ? 'success' : 'danger'}
+                                size="sm"
+                                className="flex-fill stock-toggle"
+                                onClick={() => handleToggleStatus(product.rowid)}
+                                title="Toggle stock"
+                              >
+                                <i className={`bi ${product.status === 'in_stock' ? 'bi-check-circle-fill' : 'bi-x-circle-fill'}`} aria-hidden="true"></i>
+                                <span className="ms-1 small d-none d-sm-inline">
+                                  {product.status === 'in_stock' ? 'In' : 'Out'}
+                                </span>
+                              </Button>
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                className="flex-fill"
+                                onClick={() => handleDelete(product.rowid)}
+                                disabled={deleting}
+                                title="Delete"
+                              >
+                                <i className="bi bi-trash" aria-hidden="true"></i>
+                              </Button>
+                            </div>
+                          </Card.Body>
+                        </div>
                       </Card>
                     </Col>
                   );
@@ -514,7 +545,9 @@ export default function ProductManager() {
           </div>
         </div>
       </div>
-      <Row className="g-2 mt-3 align-items-center">
+
+      {/* Pagination Footer */}
+      {/* <Row className="g-2 mt-3 align-items-center">
         <Col xs={12} md={4} lg={3} className="d-flex align-items-center gap-2">
           <span className="text-muted small">Show</span>
           <Form.Select
@@ -532,9 +565,10 @@ export default function ProductManager() {
         <Col xs={12} md={12} lg={2} className="text-lg-end text-md-center text-start">
           <small className="text-muted">Page {currentPage} of {totalPages}</small>
         </Col>
-      </Row>
-      {/* Pagination */}
-      {totalPages > 1 && paginated.length > 0 && (
+      </Row> */}
+
+      {/* Pagination Controls */}
+      {/* {totalPages > 1 && paginated.length > 0 && (
         <div className="d-flex flex-wrap justify-content-center align-items-center gap-3 mt-4">
           <span className="text-muted small">
             Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filtered.length)} of {filtered.length}
@@ -583,7 +617,36 @@ export default function ProductManager() {
             />
           </Pagination>
         </div>
-      )}
+      )} */}
+
+
+ <Modal
+        show={showImageModal}
+        onHide={() => setShowImageModal(false)}
+        centered
+        className="image-modal"
+        backdrop="static"
+        keyboard={true}
+        size="sm"
+      >
+        <Modal.Header closeButton>
+          <Modal.Title className="fs-6">Product Image</Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="d-flex justify-content-center align-items-center p-3">
+          <img
+            src={selectedImage}
+            alt="Product preview"
+            style={{
+              width: '50%',
+              maxWidth: '100%',
+              maxHeight: '100%',
+              objectFit: 'contain',
+              borderRadius: '8px',
+            }}
+          />
+        </Modal.Body>
+      </Modal>
+
 
       {/* Back to Top */}
       {showBackToTop && (

@@ -9,8 +9,8 @@ const EMPTY_FORM = {
   rowid: '',
   name: '',
   category: '',
-  amount: '',
-  price: '',
+  amount: '',        // final price after discount
+  price: '',         // original price
   image: '',
   contents: '',
   discount_percent: '',
@@ -65,12 +65,21 @@ const ProductModal = memo(function ProductModal({
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, [product, show]);
 
+  // Recalculate final price whenever price or discount changes
+  const recalcAmount = useCallback((price, discount) => {
+    const p = toNumber(price);
+    const d = toNumber(discount);
+    if (p > 0 && d >= 0 && d <= 100) {
+      return (p * (1 - d / 100)).toFixed(2);
+    }
+    return '';
+  }, []);
+
   const categoryOptions = useMemo(() => {
     const unique = Array.isArray(categories) ? [...new Set(categories.filter(Boolean))] : [];
     return unique.map((cat) => ({ label: cat, value: cat }));
   }, [categories]);
 
-  // Ensure new category is displayed even if not in options
   const selectedCategory = useMemo(() => {
     if (!form.category) return null;
     const found = categoryOptions.find((opt) => opt.value === form.category);
@@ -80,11 +89,27 @@ const ProductModal = memo(function ProductModal({
 
   const selectedStatus = STATUS_OPTIONS.find((opt) => opt.value === form.status) || STATUS_OPTIONS[0];
 
-  const handleChange = useCallback((e) => {
-    const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
-    setErrors((prev) => ({ ...prev, [name]: '' }));
-  }, []);
+  const handleChange = useCallback(
+    (e) => {
+      const { name, value } = e.target;
+      setForm((prev) => {
+        const updated = { ...prev, [name]: value };
+
+        // If price or discount changes, auto‑update amount
+        if (name === 'price' || name === 'discount_percent') {
+          const newAmount = recalcAmount(
+            name === 'price' ? value : prev.price,
+            name === 'discount_percent' ? value : prev.discount_percent
+          );
+          updated.amount = newAmount;
+        }
+
+        return updated;
+      });
+      setErrors((prev) => ({ ...prev, [name]: '' }));
+    },
+    [recalcAmount]
+  );
 
   const handleCategoryChange = useCallback((selected) => {
     setForm((prev) => ({ ...prev, category: selected?.value || '' }));
@@ -135,8 +160,8 @@ const ProductModal = memo(function ProductModal({
     const newErrors = {};
     if (!form.name.trim()) newErrors.name = 'Product name is required.';
     if (!form.category.trim()) newErrors.category = 'Category is required.';
-    const amount = toNumber(form.amount);
-    if (amount < 0) newErrors.amount = 'Price must be a positive number.';
+    const price = toNumber(form.price);
+    if (price < 0) newErrors.price = 'Original price must be a positive number.';
     const discount = toNumber(form.discount_percent);
     if (discount < 0 || discount > 100) newErrors.discount = 'Discount must be between 0 and 100.';
     setErrors(newErrors);
@@ -149,12 +174,15 @@ const ProductModal = memo(function ProductModal({
       if (isSaving) return;
       if (!validateForm()) return;
 
+      // Use the computed amount (or fallback to price if discount is 0)
+      const finalAmount = form.amount || form.price;
+
       const payload = {
         ...(form.rowid ? { rowid: form.rowid } : {}),
         name: form.name.trim(),
         category: form.category.trim(),
-        amount: toNumber(form.amount),
-        price: toNumber(form.price || form.amount),
+        amount: toNumber(finalAmount),
+        price: toNumber(form.price),
         discount_percent: Math.max(0, Math.min(100, toNumber(form.discount_percent))),
         contents: form.contents?.trim?.() || '',
         image: form.image || '',
@@ -232,24 +260,28 @@ const ProductModal = memo(function ProductModal({
               {/* Price & Discount */}
               <div className="row g-2">
                 <div className="col-6">
-                  <label htmlFor="productAmount" className="form-label fw-semibold">
-                    Price (₹) <small className="text-muted">(after discount)</small>
+                  <label htmlFor="productPrice" className="form-label fw-semibold">
+                    Original Price (₹)
                   </label>
                   <input
-                    id="productAmount"
+                    id="productPrice"
                     type="number"
-                    name="amount"
-                    value={form.amount}
+                    name="price"
+                    value={form.price}
                     onChange={handleChange}
                     step="0.01"
                     min="0"
                     disabled={isSaving}
-                    className={`form-control form-control-lg rounded-3 shadow-sm ${errors.amount ? 'is-invalid' : ''}`}
+                    className={`form-control form-control-lg rounded-3 shadow-sm ${errors.price ? 'is-invalid' : ''}`}
+                    placeholder="e.g. 100"
                   />
-                  {errors.amount && <div className="invalid-feedback d-block">{errors.amount}</div>}
+                  {errors.price && <div className="invalid-feedback d-block">{errors.price}</div>}
                 </div>
+
                 <div className="col-6">
-                  <label htmlFor="productDiscount" className="form-label fw-semibold">Discount %</label>
+                  <label htmlFor="productDiscount" className="form-label fw-semibold">
+                    Discount %
+                  </label>
                   <input
                     id="productDiscount"
                     type="number"
@@ -260,8 +292,25 @@ const ProductModal = memo(function ProductModal({
                     max="100"
                     disabled={isSaving}
                     className={`form-control form-control-lg rounded-3 shadow-sm ${errors.discount ? 'is-invalid' : ''}`}
+                    placeholder="e.g. 20"
                   />
                   {errors.discount && <div className="invalid-feedback d-block">{errors.discount}</div>}
+                </div>
+
+                <div className="col-12">
+                  <label htmlFor="productAmount" className="form-label fw-semibold">
+                    Final Price (₹) <small className="text-muted">(after discount)</small>
+                  </label>
+                  <input
+                    id="productAmount"
+                    type="text"
+                    name="amount"
+                    value={form.amount}
+                    readOnly               
+                     className="form-control form-control-lg shadow-sm bg-light"
+                      placeholder="Auto‑calculated"
+                      style={{ pointerEvents: 'none'}}
+                  />
                 </div>
               </div>
 
@@ -315,7 +364,7 @@ const ProductModal = memo(function ProductModal({
                       src={imagePreview}
                       alt="Preview"
                       className="img-fluid rounded-3 border shadow-sm edit-image"
-                      style={{ maxHeight: '200px', objectFit: 'contain ' }}
+                      style={{ maxHeight: '200px', objectFit: 'contain' }}
                     />
                     <Button
                       type="button"
