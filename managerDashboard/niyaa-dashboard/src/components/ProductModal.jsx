@@ -309,7 +309,7 @@ const ProductModal = memo(function ProductModal({
                     readOnly               
                      className="form-control form-control-lg shadow-sm bg-light"
                       placeholder="Auto‑calculated"
-                      style={{ pointerEvents: 'none'}}
+                      style={{ cursor: 'not-allowed' }}
                   />
                 </div>
               </div>

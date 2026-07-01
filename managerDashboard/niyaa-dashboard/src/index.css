@@ -1299,7 +1299,7 @@ img[alt='Admin'] {
 /* Hover: 3D pop + black with gold glow */
 .back-to-top-3d:hover {
   background: linear-gradient(145deg, #ffd700, #f0c000) !important;
-  color: #ffd700 !important;
+  color: #0e0d0d !important;
   box-shadow:
     0 16px 45px rgba(255, 215, 0, 0.6),
     0 8px 20px rgba(0, 0, 0, 0.4),

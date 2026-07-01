@@ -4,7 +4,6 @@ import {
   Col,
   Form,
   Button,
-  //Pagination,
   InputGroup,
   Badge,
   Card,
@@ -20,6 +19,11 @@ import { reactSelectStyles, portalSelectProps } from '../utils/selectStyles';
 
 //const PAGE_SIZE_OPTIONS = [20, 40, 80, 200, 500];
 const FALLBACK_IMAGE = 'https://via.placeholder.com/400x300/f0edf5/6C5CE7?text=No+Image';
+const STATUS_FILTER_OPTIONS = [
+  { value: '', label: 'All Status' },
+  { value: 'in_stock', label: 'In Stock' },
+  { value: 'no_stock', label: 'Out of Stock' },
+];
 
 function normalizeProducts(products) {
   if (!Array.isArray(products)) return [];
@@ -40,7 +44,11 @@ function normalizeText(value) {
   return String(value ?? '').trim().toLowerCase();
 }
 
-export default function ProductManager() {
+export default function ProductManager({
+  // New props from Dashboard
+  filterCategory: propFilterCategory = null,
+  filterStatus: propFilterStatus = null,
+}) {
   // ---------- State ----------
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -48,13 +56,16 @@ export default function ProductManager() {
   const [error, setError] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [search, setSearch] = useState('');
-  const [filterCategory, setFilterCategory] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
+  
+  // Internal filter states – initialised from props
+  const [internalCategory, setInternalCategory] = useState(propFilterCategory || '');
+  const [internalStatus, setInternalStatus] = useState(propFilterStatus || '');
   // const [pageSize, setPageSize] = useState(5000);
+  const [currentPage, setCurrentPage] = useState(1);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [deleting, setDeleting] = useState(false);
-const [showImageModal, setShowImageModal] = useState(false);
-const [selectedImage, setSelectedImage] = useState("");
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [selectedImage, setSelectedImage] = useState('');
   const [showProductModal, setShowProductModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
 
@@ -70,12 +81,27 @@ const [selectedImage, setSelectedImage] = useState("");
     onCancel: null,
   });
 
-  // Refs for touch swipe
   const gridContainerRef = useRef(null);
-  const touchStartX = useRef(0);
-  const touchStartY = useRef(0);
-  const isSwiping = useRef(false);
   const deleteProcessingRef = useRef(false);
+
+  // ---------- Sync with props ----------
+  useEffect(() => {
+    // When Dashboard sends a new category filter, update internal state
+    if (propFilterCategory !== undefined && propFilterCategory !== null) {
+      setInternalCategory(propFilterCategory);
+    } else {
+      // If prop is null, clear the filter (e.g., clicking sidebar Products)
+      setInternalCategory('');
+    }
+  }, [propFilterCategory]);
+
+  useEffect(() => {
+    if (propFilterStatus !== undefined && propFilterStatus !== null) {
+      setInternalStatus(propFilterStatus);
+    } else {
+      setInternalStatus('');
+    }
+  }, [propFilterStatus]);
 
   // ---------- Load Data ----------
   const loadData = useCallback(async () => {
@@ -218,17 +244,79 @@ const [selectedImage, setSelectedImage] = useState("");
     });
   };
 
-  // ---------- Filter & Pagination ----------
+  // ---------- Filtering ----------
   const filtered = useMemo(() => {
     const query = normalizeText(search);
     return products.filter((p) => {
       const matchesSearch = !query || normalizeText(p.name).includes(query) || normalizeText(p.category).includes(query);
-      const matchesCategory = !filterCategory || p.category === filterCategory;
-      return matchesSearch && matchesCategory;
+      const matchesCategory = !internalCategory || p.category === internalCategory;
+      const matchesStatus = !internalStatus || p.status === internalStatus;
+      return matchesSearch && matchesCategory && matchesStatus;
     });
-  }, [products, search, filterCategory]);
+  }, [products, search, internalCategory, internalStatus]);
 
-  // const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  // ---------- Category & Status dropdown options ----------
+  const categoryOptions = useMemo(() => categories.map(c => ({ label: c, value: c })), [categories]);
+  const selectedCategory = categoryOptions.find(opt => opt.value === internalCategory) || null;
+  const selectedStatus = STATUS_FILTER_OPTIONS.find(opt => opt.value === internalStatus) || STATUS_FILTER_OPTIONS[0];
+
+  // ---------- Back to top ----------
+  useEffect(() => {
+    const handleScroll = () => setShowBackToTop(window.scrollY > 400);
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  // ---------- Export/Import ----------
+  const handleExport = useCallback(() => {
+    const payload = { products, exportedAt: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `products_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [products]);
+
+  const handleImport = useCallback(async (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const parsed = JSON.parse(e.target.result);
+        const importedProducts = parsed?.products;
+        if (!Array.isArray(importedProducts) || importedProducts.length === 0) {
+          showAlert('Error', 'No products found in the file.', 'danger');
+          return;
+        }
+        setAlert({
+          show: true,
+          title: 'Confirm Import',
+          message: `This will replace ALL existing products with ${importedProducts.length} products from the file. Continue?`,
+          variant: 'warning',
+          confirmText: 'Import',
+          showCancel: true,
+          cancelText: 'Cancel',
+          onConfirm: async () => {
+            setAlert((prev) => ({ ...prev, show: false }));
+            const normalized = normalizeProducts(importedProducts);
+            setProducts(normalized);
+            setCategories([...new Set(normalized.map(p => p.category).filter(Boolean))]);
+            await saveProducts(normalized, 'Import successful!');
+          },
+          onCancel: () => setAlert((prev) => ({ ...prev, show: false })),
+        });
+      } catch (err) {
+        showAlert('Error', 'Invalid JSON file.', 'danger');
+      }
+    };
+    reader.readAsText(file);
+  }, [saveProducts]);
+
+   // const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   // useEffect(() => {
   //   if (currentPage > totalPages) setCurrentPage(totalPages);
   // }, [currentPage, totalPages]);
@@ -281,65 +369,6 @@ const [selectedImage, setSelectedImage] = useState("");
   //   };
   // }, [currentPage, totalPages]);
 
-  // ---------- Back to top ----------
-  useEffect(() => {
-    const handleScroll = () => setShowBackToTop(window.scrollY > 400);
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
-
-  const scrollToTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
-
-  // ---------- Category filter options ----------
-  const categoryOptions = useMemo(() => categories.map(c => ({ label: c, value: c })), [categories]);
-  const selectedFilterCategory = categoryOptions.find(opt => opt.value === filterCategory) || null;
-
-  // ---------- Export/Import ----------
-  const handleExport = useCallback(() => {
-    const payload = { products, exportedAt: new Date().toISOString() };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `products_backup_${new Date().toISOString().slice(0, 10)}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-  }, [products]);
-
-  const handleImport = useCallback(async (file) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        const parsed = JSON.parse(e.target.result);
-        const importedProducts = parsed?.products;
-        if (!Array.isArray(importedProducts) || importedProducts.length === 0) {
-          showAlert('Error', 'No products found in the file.', 'danger');
-          return;
-        }
-        setAlert({
-          show: true,
-          title: 'Confirm Import',
-          message: `This will replace ALL existing products with ${importedProducts.length} products from the file. Continue?`,
-          variant: 'warning',
-          confirmText: 'Import',
-          showCancel: true,
-          cancelText: 'Cancel',
-          onConfirm: async () => {
-            setAlert((prev) => ({ ...prev, show: false }));
-            const normalized = normalizeProducts(importedProducts);
-            setProducts(normalized);
-            setCategories([...new Set(normalized.map(p => p.category).filter(Boolean))]);
-            await saveProducts(normalized, 'Import successful!');
-          },
-          onCancel: () => setAlert((prev) => ({ ...prev, show: false })),
-        });
-      } catch (err) {
-        showAlert('Error', 'Invalid JSON file.', 'danger');
-      }
-    };
-    reader.readAsText(file);
-  }, [saveProducts]);
 
   // ---------- Render ----------
   if (loading && products.length === 0) {
@@ -367,9 +396,15 @@ const [selectedImage, setSelectedImage] = useState("");
           <span className="pt-3"><h4 className="mb-0 fw-semibold">Products</h4></span>
           <span className="badge bg-secondary ms-2">{filtered.length} total</span>
           {isSaving && <span className="badge bg-primary ms-2">Saving...</span>}
+          {/* Active filter indicator */}
+          {(internalCategory || internalStatus) && (
+            <Badge bg="warning" className="ms-2">
+              <i className="bi bi-funnel me-1"></i> Filtered
+            </Badge>
+          )}
         </div>
         <div className="d-flex gap-2 flex-wrap">
-          {/* <ExportImport onExport={handleExport} onImport={handleImport} /> */}
+           {/* <ExportImport onExport={handleExport} onImport={handleImport} /> */}
           <Button variant="primary" size="sm" onClick={openAddModal}>
             <i className="bi bi-plus-lg me-1" aria-hidden="true"></i> Add Product
           </Button>
@@ -378,7 +413,7 @@ const [selectedImage, setSelectedImage] = useState("");
 
       {/* Filters */}
       <Row className="g-2 mb-4 align-items-center">
-        <Col xs={11} md={6} lg={4} className="mx-auto">
+        <Col xs={12} md={4} lg={3}>
           <InputGroup>
             <InputGroup.Text><i className="bi bi-search"></i></InputGroup.Text>
             <Form.Control
@@ -389,17 +424,39 @@ const [selectedImage, setSelectedImage] = useState("");
             />
           </InputGroup>
         </Col>
-        <Col xs={11} md={5} lg={6} className="mx-auto">
+        <Col xs={12} md={4} lg={4}>
           <Select
             options={categoryOptions}
-            value={selectedFilterCategory}
-            onChange={(selected) => { setFilterCategory(selected?.value || ''); setCurrentPage(1); }}
+            value={selectedCategory}
+            onChange={(selected) => { setInternalCategory(selected?.value || ''); setCurrentPage(1); }}
             placeholder="All Categories"
             isClearable
             {...portalSelectProps}
             styles={reactSelectStyles}
           />
         </Col>
+        <Col xs={12} md={4} lg={3}>
+          <Select
+            options={STATUS_FILTER_OPTIONS}
+            value={selectedStatus}
+            onChange={(selected) => { setInternalStatus(selected?.value || ''); setCurrentPage(1); }}
+            placeholder="All Status"
+            isClearable
+            {...portalSelectProps}
+            styles={reactSelectStyles}
+          />
+        </Col>
+        {(internalCategory || internalStatus) && (
+          <Col xs={12} md="auto">
+            <Button
+              variant="outline-secondary"
+              size="sm"
+              onClick={() => { setInternalCategory(''); setInternalStatus(''); }}
+            >
+              <i className="bi bi-x-circle me-1"></i> Clear Filters
+            </Button>
+          </Col>
+        )}
       </Row>
 
       {/* Product Grid */}
@@ -477,11 +534,11 @@ const [selectedImage, setSelectedImage] = useState("");
                             <span className="category-badge small">
                               {product.category || 'Others'}
                             </span>
-                            <span className="d-flex small  gap-2 content-text">
-                            {product.contents ? `${product.contents}` : ''}
-                               <span className="text-decoration-line-through fw-bold text-muted">
-                              {product.price ? `₹${formatINR(product.price)}` : ''}
-                            </span>
+                            <span className="d-flex small gap-2 content-text fw-bold">
+                              {product.contents ? `${product.contents}` : ''}
+                              <span className="text-decoration-line-through fw-bold text-muted">
+                                {product.price ? `₹${formatINR(product.price)}` : ''}
+                              </span>
                             </span>
                             <div className="mt-auto pt-2">
                               <div className="d-flex justify-content-between align-items-center gap-2">
@@ -545,8 +602,7 @@ const [selectedImage, setSelectedImage] = useState("");
           </div>
         </div>
       </div>
-
-      {/* Pagination Footer */}
+ {/* Pagination Footer */}
       {/* <Row className="g-2 mt-3 align-items-center">
         <Col xs={12} md={4} lg={3} className="d-flex align-items-center gap-2">
           <span className="text-muted small">Show</span>
@@ -619,8 +675,8 @@ const [selectedImage, setSelectedImage] = useState("");
         </div>
       )} */}
 
-
- <Modal
+      {/* Image Modal */}
+      <Modal
         show={showImageModal}
         onHide={() => setShowImageModal(false)}
         centered
@@ -646,7 +702,6 @@ const [selectedImage, setSelectedImage] = useState("");
           />
         </Modal.Body>
       </Modal>
-
 
       {/* Back to Top */}
       {showBackToTop && (

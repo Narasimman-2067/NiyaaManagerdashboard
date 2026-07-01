@@ -8,6 +8,7 @@ import {
   Col,
   Badge,
   Image,
+  Modal,
 } from 'react-bootstrap';
 import DashboardHome from './DashboardHome';
 import ProductsManager from './ProductsManager';
@@ -65,21 +66,86 @@ const Dashboard = memo(function Dashboard({
   const safeProducts = Array.isArray(products) ? products : [];
   const safeEnquiries = Array.isArray(enquiries) ? enquiries : [];
 
+  // View state
   const [view, setView] = useState(() => getStoredView());
   const [showOffcanvas, setShowOffcanvas] = useState(false);
 
+  // Filter state for Products view
+  const [filterCategory, setFilterCategory] = useState(null);
+  const [filterStatus, setFilterStatus] = useState(null);
+
+  // Modal states
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [showOutOfStockModal, setShowOutOfStockModal] = useState(false);
+
+  // Derived data
+  const totalProducts = safeProducts.length;
+  const categories = useMemo(() => {
+    return [...new Set(safeProducts.map((p) => (p?.category?.trim() || 'Misc')))];
+  }, [safeProducts]);
+
+  const outOfStockProducts = useMemo(() => {
+    return safeProducts.filter((p) => p?.status === 'no_stock');
+  }, [safeProducts]);
+
+  // ----- Filter & navigation handlers -----
+  const clearFilters = useCallback(() => {
+    setFilterCategory(null);
+    setFilterStatus(null);
+  }, []);
+
+  const navigateToProductsWithFilter = useCallback((category, status) => {
+    setFilterCategory(category || null);
+    setFilterStatus(status || null);
+    setView('products');
+    setShowOffcanvas(false);
+  }, []);
+
+  // Dashboard stat click handlers
+  const navigateToProducts = useCallback(() => {
+    clearFilters();
+    setView('products');
+    setShowOffcanvas(false);
+  }, [clearFilters]);
+
+  const openCategoryModal = useCallback(() => setShowCategoryModal(true), []);
+  const closeCategoryModal = useCallback(() => setShowCategoryModal(false), []);
+
+  const openOutOfStockModal = useCallback(() => setShowOutOfStockModal(true), []);
+  const closeOutOfStockModal = useCallback(() => setShowOutOfStockModal(false), []);
+
+  // Handlers for modal actions
+  const handleCategoryClick = useCallback((cat) => {
+    navigateToProductsWithFilter(cat, null);
+    closeCategoryModal();
+  }, [navigateToProductsWithFilter, closeCategoryModal]);
+
+  const handleViewOutOfStock = useCallback(() => {
+    navigateToProductsWithFilter(null, 'no_stock');
+    closeOutOfStockModal();
+  }, [navigateToProductsWithFilter, closeOutOfStockModal]);
+
+  // Nav / offcanvas handlers
+  const closeOffcanvas = useCallback(() => setShowOffcanvas(false), []);
+  const toggleOffcanvas = useCallback(() => setShowOffcanvas((p) => !p), []);
+
+  const handleNavClick = useCallback((key) => {
+    if (!VALID_VIEWS.includes(key)) return;
+    if (key === 'products') clearFilters();
+    setView(key);
+    setShowOffcanvas(false);
+  }, [clearFilters]);
+
+  const handleDesktopNavClick = useCallback((key) => {
+    if (!VALID_VIEWS.includes(key)) return;
+    if (key === 'products') clearFilters();
+    setView(key);
+  }, [clearFilters]);
+
+  // Persist view
   useEffect(() => {
     setStoredView(view);
   }, [view]);
-
-  const totalProducts = safeProducts.length;
-  const categories = useMemo(() => {
-    return [...new Set(
-      safeProducts.map((p) => (p?.category?.trim() || 'Misc'))
-    )];
-  }, [safeProducts]);
-
-  const outOfStock = safeProducts.filter((p) => p?.status === 'no_stock').length;
 
   const navItems = useMemo(
     () => [
@@ -88,20 +154,6 @@ const Dashboard = memo(function Dashboard({
     ],
     []
   );
-
-  const closeOffcanvas = useCallback(() => setShowOffcanvas(false), []);
-  const toggleOffcanvas = useCallback(() => setShowOffcanvas((p) => !p), []);
-
-  const handleNavClick = useCallback((key) => {
-    if (!VALID_VIEWS.includes(key)) return;
-    setView(key);
-    setShowOffcanvas(false);
-  }, []);
-
-  const handleDesktopNavClick = useCallback((key) => {
-    if (!VALID_VIEWS.includes(key)) return;
-    setView(key);
-  }, []);
 
   return (
     <>
@@ -206,11 +258,11 @@ const Dashboard = memo(function Dashboard({
               <DashboardHome
                 totalProducts={totalProducts}
                 totalCategories={categories.length}
-                outOfStock={outOfStock}
+                outOfStock={outOfStockProducts.length}
                 enquiries={safeEnquiries}
-                onAdd={onAdd}
-                onExport={onExport}
-                onImport={onImport}
+                onNavigateToProducts={navigateToProducts}
+                onShowCategories={openCategoryModal}
+                onShowOutOfStock={openOutOfStockModal}
               />
             )}
 
@@ -218,6 +270,8 @@ const Dashboard = memo(function Dashboard({
               <ProductsManager
                 products={safeProducts}
                 categories={categories}
+                filterCategory={filterCategory}
+                filterStatus={filterStatus}
                 onAdd={onAdd}
                 onUpdate={onUpdate}
                 onDelete={onDelete}
@@ -229,6 +283,82 @@ const Dashboard = memo(function Dashboard({
           </Col>
         </Row>
       </Container>
+
+      {/* Category Modal */}
+      <Modal show={showCategoryModal} onHide={closeCategoryModal} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Categories</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {categories.length === 0 ? (
+            <p className="text-muted">No categories found.</p>
+          ) : (
+            <ul className="list-group list-group-flush">
+              {categories.map((cat, idx) => (
+                <li
+                  key={idx}
+                  className="list-group-item d-flex justify-content-between align-items-center clickable-list-item"
+                  onClick={() => handleCategoryClick(cat)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleCategoryClick(cat);
+                    }
+                  }}
+                >
+                  {cat}
+                  <Badge bg="secondary" pill>
+                    {safeProducts.filter((p) => p.category === cat).length}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={closeCategoryModal}>
+            Close
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      {/* Out of Stock Modal */}
+      <Modal show={showOutOfStockModal} onHide={closeOutOfStockModal} centered size="lg">
+        <Modal.Header closeButton>
+          <Modal.Title>Out of Stock Products</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {outOfStockProducts.length === 0 ? (
+            <p className="text-muted">All products are in stock.</p>
+          ) : (
+            <>
+              <ul className="list-group list-group-flush">
+                {outOfStockProducts.map((p) => (
+                  <li key={p.rowid || p.id} className="list-group-item d-flex justify-content-between align-items-center">
+                    <span>
+                      <i className="bi bi-box me-2 text-danger"></i>
+                      {p.name || 'Unnamed'}
+                    </span>
+                    <Badge bg="danger">Out of Stock</Badge>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-3 text-center">
+                <Button variant="primary" onClick={handleViewOutOfStock}>
+                  <i className="bi bi-eye me-1"></i> View All Out of Stock
+                </Button>
+              </div>
+            </>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={closeOutOfStockModal}>
+            Close
+          </Button>
+        </Modal.Footer>
+      </Modal>
 
       {/* Mobile offcanvas */}
       <Offcanvas
@@ -245,21 +375,6 @@ const Dashboard = memo(function Dashboard({
           </Offcanvas.Title>
         </Offcanvas.Header>
         <Offcanvas.Body className="d-flex flex-column mt-2">
-          {/* <div
-            className="d-flex align-items-center gap-3 mb-4 p-3 rounded"
-            style={{ background: darkMode ? '#2d2d3f' : '#f0edf5' }}
-          >
-            <Image
-              src="https://ui-avatars.com/api/?name=Admin&background=6C5CE7&color=fff&size=48"
-              roundedCircle
-              alt="Admin"
-              style={{ width: '48px', height: '48px' }}
-            />
-            <div>
-              <div className="fw-bold">Admin</div>
-              <small className="text-muted">admin@example.com</small>
-            </div>
-          </div> */}
           {navItems.map((item) => (
             <NavButton
               key={item.key}

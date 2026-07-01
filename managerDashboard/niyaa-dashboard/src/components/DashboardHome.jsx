@@ -1,30 +1,29 @@
 import React, { useMemo, memo } from 'react';
 import { Row, Col, Card } from 'react-bootstrap';
-import EnquiryStats from './EnquiryStats';
 
 /**
  * DashboardHome
  * ---------------------------------------------------------------------------
  * Summary view for the admin dashboard.
  * Shows:
- * - total products
- * - total categories
- * - out-of-stock count
- * - enquiry summary widget
+ * - total products (click → navigate to products view)
+ * - total categories (click → open categories modal)
+ * - out-of-stock count (click → open out-of-stock modal)
  */
 const DashboardHome = memo(function DashboardHome({
   totalProducts = 0,
   totalCategories = 0,
   outOfStock = 0,
   enquiries = [],
+  onNavigateToProducts,
+  onShowCategories,
+  onShowOutOfStock,
 }) {
-  /**
-   * Defensive safety in case parent accidentally passes a non-array value.
-   */
+  // Defensive safety
   const safeEnquiries = Array.isArray(enquiries) ? enquiries : [];
 
   /**
-   * Dashboard stat cards are memoized because they only depend on numeric props.
+   * Stat cards with click handlers.
    */
   const stats = useMemo(
     () => [
@@ -34,6 +33,7 @@ const DashboardHome = memo(function DashboardHome({
         value: totalProducts,
         icon: 'bi-box',
         color: 'primary',
+        onClick: onNavigateToProducts,
       },
       {
         key: 'categories',
@@ -41,6 +41,7 @@ const DashboardHome = memo(function DashboardHome({
         value: totalCategories,
         icon: 'bi-tags',
         color: 'success',
+        onClick: onShowCategories,
       },
       {
         key: 'out-of-stock',
@@ -48,35 +49,42 @@ const DashboardHome = memo(function DashboardHome({
         value: outOfStock,
         icon: 'bi-exclamation-triangle',
         color: 'danger',
+        onClick: onShowOutOfStock,
       },
     ],
-    [totalProducts, totalCategories, outOfStock]
+    [totalProducts, totalCategories, outOfStock, onNavigateToProducts, onShowCategories, onShowOutOfStock]
   );
 
   return (
     <>
-      {/* ------------------------------------------------------------------ */}
-      {/* Page Header                                                        */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="d-flex align-items-center gap-2 mb-4 ">
+      {/* Page Header */}
+      <div className="d-flex align-items-center gap-2 mb-4">
         <i className="bi bi-house-door fs-4 text-primary-custom" aria-hidden="true"></i>
         <span className="pt-3"><h4 className="mb-0 fw-semibold">Dashboard</h4></span>
       </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Stat Cards + Enquiry Widget                                        */}
-      {/* ------------------------------------------------------------------ */}
+      {/* Stat Cards */}
       <Row className="g-3">
         {stats.map((stat) => (
           <Col xs={6} md={4} lg={3} key={stat.key}>
-            <Card className="stat-card stat-card-light h-100">
+            <Card
+              className="stat-card stat-card-light h-100 clickable-stat"
+              onClick={stat.onClick}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  stat.onClick?.();
+                }
+              }}
+            >
               <Card.Body>
                 <div className="d-flex justify-content-between align-items-center">
                   <div>
                     <div className="text-muted small fw-medium">{stat.label}</div>
                     <div className="h2 fw-bold mt-1 mb-0">{stat.value}</div>
                   </div>
-
                   <div
                     className={`text-${stat.color} opacity-75`}
                     style={{ fontSize: '2.4rem', lineHeight: 1 }}
@@ -89,28 +97,14 @@ const DashboardHome = memo(function DashboardHome({
             </Card>
           </Col>
         ))}
-
-        {/* <Col xs={12} md={6} lg={3}>
-          <EnquiryStats enquiries={safeEnquiries} />
-        </Col> */}
       </Row>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Quick Actions Info Card                                            */}
-      {/* ------------------------------------------------------------------ */}
-      {/* <Card className="mt-4 shadow-sm border-0 stat-card">
-        <Card.Body className="d-flex align-items-center gap-3 flex-wrap">
-          <i className="bi bi-info-circle fs-4 text-primary-custom" aria-hidden="true"></i>
-
-          <div>
-            <h6 className="mb-0 fw-semibold">Quick Actions</h6>
-            <p className="text-muted small mb-0">
-              Use the <strong>Products</strong> menu to manage your inventory.
-              Export/Import is available for backups and bulk updates.
-            </p>
-          </div>
-        </Card.Body>
-      </Card> */}
+     
+      {/* <Row className="mt-3">
+        <Col xs={12} md={6} lg={4}>
+          <EnquiryStats enquiries={safeEnquiries} />
+        </Col>
+      </Row> */}
     </>
   );
 });
