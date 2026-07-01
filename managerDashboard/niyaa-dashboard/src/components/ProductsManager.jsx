@@ -511,7 +511,7 @@ export default function ProductManager({
                                 e.target.onerror = null;
                                 e.target.src = FALLBACK_IMAGE;
                               }}
-                              loading="lazy"
+                              loading="eager"
                             />
                             {product.discount_percent > 0 && (
                               <Badge
